@@ -10,7 +10,8 @@ changes what is missing.
 
 It can also provision everything on KVM/libvirt: the node image, three Ubuntu
 VMs with a TPM 2.0 each, a bootstrap VM, and a BGP peer on the hypervisor for
-the VIP.
+the VIP. With a GPU in the hypervisor, one node VM gets it through VFIO and
+the NVIDIA GPU Operator gives it a driver.
 
 NVKE itself is a preview: NVIDIA does not recommend it for production
 workloads yet, and its APIs and behaviour can change between releases. This
@@ -25,10 +26,14 @@ comes with no guarantee of any kind; see
 | `omerfsen.nvke.nvke` | role | Bootstrap host (`bootstrap_host`), node preparation (`node`), `nvkectl bootstrap site` and the kubeconfig (`site`) |
 | `omerfsen.nvke.node_image` | role | Builds the NVKE reference node image (Ubuntu, nvke-agent, spire-agent) from a pinned release |
 | `omerfsen.nvke.bgp_peer` | role | FRR on the nodes' gateway, installing the API VIP that kube-vip announces |
-| `omerfsen.nvke.libvirt_vm` | role | One UEFI VM on libvirt/KVM, optionally with a TPM 2.0, on a DHCP reservation or a static address |
+| `omerfsen.nvke.libvirt_vm` | role | One UEFI VM on libvirt/KVM, optionally with a TPM 2.0 and passed-through PCI devices, on a DHCP reservation or a static address |
+| `omerfsen.nvke.gpu_passthrough` | role | Binds a hypervisor's GPU to vfio-pci from boot, for a GPU node VM |
+| `omerfsen.nvke.gpu_operator` | role | The NVIDIA GPU Operator on the cluster (AICR's pinned version), proven with a CUDA pod |
 | `omerfsen.nvke.cluster` | playbook | The management cluster on any inventory with groups `nvke_bootstrap` and `nvke_nodes` |
 | `omerfsen.nvke.image` | playbook | The node image on the first `kvm_hosts` host |
-| `omerfsen.nvke.kvm` | playbook | Image, VMs and BGP peer on the `kvm_hosts`, then `cluster` on them |
+| `omerfsen.nvke.kvm` | playbook | GPU passthrough, image, VMs and BGP peer on the `kvm_hosts`, then `cluster` and `gpu_operator` on them |
+| `omerfsen.nvke.gpu_passthrough` | playbook | Bind each hypervisor's `nvke_kvm_gpu_devices` to vfio-pci |
+| `omerfsen.nvke.gpu_operator` | playbook | The GPU Operator on the cluster, from the bootstrap host (`nvke_gpu_operator: true`) |
 | `omerfsen.nvke.kvm_destroy` | playbook | Destroy those VMs (asks for confirmation) |
 
 ## Support matrix
@@ -43,7 +48,8 @@ comes with no guarantee of any kind; see
 | Image build host | Ubuntu/Debian with KVM, of the image's architecture |
 | ansible-core | 2.16 or later |
 | Provisioning | KVM/libvirt (one hypervisor on its NAT network, or several on a shared bridge) |
-| Tested | NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover |
+| GPU | NVIDIA GPU Operator v26.7.2 (the version AICR pins), driver 595.91.07; on KVM, one GPU passed through to a node VM with VFIO |
+| Tested | NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator ready, CUDA, TensorFlow, PyTorch and TensorRT workloads pass, rerun `changed=0` |
 
 ## Quick start
 
@@ -108,7 +114,8 @@ ansible-playbook -i inventory.yml omerfsen.nvke.cluster
 
 - The NVKE management plane (Cluster API, CAPNICo, SPIRE, the NVKE API) on
   the management cluster
-- GPU nodes: the NVIDIA GPU Operator and workload clusters on GPU hardware
+- GPU workload clusters through NICo (GPU nodes on the management cluster
+  are done)
 - Bare-metal provisioning next to `libvirt_vm`
 
 ## License and disclaimer

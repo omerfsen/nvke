@@ -134,6 +134,7 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | `libvirt_vm_ovmf_code` | path | `/usr/share/OVMF/OVMF_CODE_4M.fd` | UEFI firmware code (without Secure Boot). |
 | `libvirt_vm_ovmf_vars` | path | `/usr/share/OVMF/OVMF_VARS_4M.fd` | UEFI variable store template matching `libvirt_vm_ovmf_code`. |
 | `libvirt_vm_tpm` | bool | `False` | Give the guest a TPM 2.0 (swtpm emulator, TIS interface). |
+| `libvirt_vm_hostdevs` | list | `[]` | PCI functions passed through to the VM, in full `DDDD:BB:DD.F` form (a GPU and its audio function). Each must be bound to vfio-pci on the host already (M(omerfsen.nvke.gpu_passthrough) role); the VM gets them with `managed='no'`. Applies when the VM is created. |
 | `libvirt_vm_user` | str | `ubuntu` | Login user, with passwordless sudo and SSH key login only. |
 | `libvirt_vm_cloud_config` | dict | `{}` | More cloud-config for the first boot (e.g. `write_files`, `runcmd`), merged over the hostname, user and SSH key the role sets. |
 | `libvirt_vm_autostart` | bool | `True` | Start the domain with the host. |
@@ -143,3 +144,30 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | `libvirt_vm_ssh_key_dir` | path | `~/.ssh/nvke` | Where the per-VM keypairs are kept, on the controller. |
 | `libvirt_vm_packages` | list |  | KVM host packages the role installs when missing (Debian/Ubuntu names). |
 | `libvirt_vm_ssh_key_path` | path |  | Private key of this VM. Default `<key dir>/<name>_ed25519`. |
+
+## omerfsen.nvke.gpu_passthrough
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `gpu_passthrough_devices` | list |  | **Required.** PCI functions to hand over, in full `DDDD:BB:DD.F` form, for example `0000:01:00.0` and `0000:01:00.1`. Every function in the GPU's IOMMU group must be listed. |
+| `gpu_passthrough_mode` | str | `permanent` | `permanent` gives the devices to vfio-pci from boot; `off` gives them back to the host. |
+
+## omerfsen.nvke.gpu_operator
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `gpu_operator_kubeconfig` | str |  | **Required.** Path of the cluster's admin kubeconfig on the target host. |
+| `gpu_operator_version` | str | `v26.7.2` | GPU Operator chart version. Change `gpu_operator_chart_sha256` with it. |
+| `gpu_operator_chart_url` | str | `https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-{{ gpu_operator_version }}.tgz` | Where the chart is downloaded from. |
+| `gpu_operator_chart_sha256` | str | `a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6` | SHA-256 of the chart archive. |
+| `gpu_operator_namespace` | str | `gpu-operator` | Namespace of the release, labelled to admit privileged pods. |
+| `gpu_operator_release` | str | `gpu-operator` | Helm release name. |
+| `gpu_operator_driver_version` | str | `595.91.07` | NVIDIA driver the operator builds on each GPU node. A driver image for the node's Ubuntu release must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04` for the default node image). |
+| `gpu_operator_values` | dict | `{}` | More chart values, merged over the role's. |
+| `gpu_operator_helm` | path | `/usr/local/bin/helm` | helm on the target host. |
+| `gpu_operator_kubectl` | path | `/usr/local/bin/kubectl` | kubectl on the target host. |
+| `gpu_operator_workdir` | path | `/var/lib/nvke/gpu-operator` | Where the chart and the values file are kept. |
+| `gpu_operator_timeout_minutes` | int | `30` | How long to wait for every operand to be ready; the driver is built on each GPU node. |
+| `gpu_operator_expected_gpus` | int | `1` | GPUs the cluster must offer as `nvidia.com/gpu`, summed over its nodes. |
+| `gpu_operator_smoke_test` | bool | `True` | Run a CUDA vectorAdd pod on one GPU after the install, then delete it. |
+| `gpu_operator_smoke_test_image` | str | `nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04@sha256:7c7540bdf1f942d4fb6db97069fd6c289471b54ac29e3c7fcdf914cf77af7d41` | The test image, pinned by digest. |

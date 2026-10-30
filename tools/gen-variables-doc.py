@@ -12,6 +12,8 @@ ROLES = [
     ("node_image", ["main"]),
     ("bgp_peer", ["main"]),
     ("libvirt_vm", ["main"]),
+    ("gpu_passthrough", ["main"]),
+    ("gpu_operator", ["main"]),
 ]
 
 

@@ -333,3 +333,83 @@ leaves through `br1` and hits libvirt's own rule
 `-A LIBVIRT_FWO -i virbr0 -j REJECT`: only `-o eno1` is accepted and
 masqueraded. A host-specific fault, not the collection's: the network's
 forward device has to be the interface the default route uses, or none.
+
+Fixed on this host with `virsh net-define` of the same network with
+`<forward mode='nat'/>` (backup of the old definition kept) and a restart of
+the network while no VM used it. The rules then read
+`-A LIBVIRT_FWO -s 192.168.90.0/24 -i virbr0 -j ACCEPT` and
+`-A LIBVIRT_PRT -s 192.168.90.0/24 ! -d 192.168.90.0/24 -j MASQUERADE`.
+See *The VMs have no internet access* in the troubleshooting page.
+
+### From scratch
+
+The node image, while the network was still being fixed (Packer's QEMU has
+its own user-mode network):
+
+```text
+ansible-playbook playbooks/image.yml     # ok=21 changed=10, real 12m44s (boot-smoke passed)
+```
+
+About half the time it took on the 32-core Ubuntu 22.04 host. Then
+`kvm.yml` with the image in place: passthrough check, four VMs (the GPU on
+`nvke-cp-03`), FRR, the bootstrap, the GPU Operator.
+
+```text
+localhost      : ok=143 changed=45 failed=0
+nvke-bootstrap : ok=109 changed=36 failed=0
+nvke-cp-01..03 : ok=18  changed=0  failed=0     # the first-boot user data had done it all
+real 14m50s
+```
+
+Inside `nvke-cp-03` before the driver, `lspci` shows the card on the VM's
+own PCI bus (`05:00.0 VGA ... [10de:2702]`, `06:00.0 Audio ... [10de:22bb]`),
+22 GiB of memory, kernel `7.0.0-1018-nvidia`. The bootstrap took about 13
+minutes; `nvke-cp-03` ran `kubeadm init`. The GPU Operator then: the driver
+container built `595.91.07` for the `linux-nvidia` 7.0 kernel in about three
+minutes, the other operands followed, and:
+
+```text
+$ kubectl get nodes -o 'custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
+NAME                    GPU
+nvke-mgmt-cp-066582f5   1        # nvke-cp-03
+nvke-mgmt-cp-358b92e9   <none>
+nvke-mgmt-cp-e10618cf   <none>
+
+$ kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -c nvidia-driver-ctr -- nvidia-smi ...
+NVIDIA GeForce RTX 4080 SUPER, 595.91.07, 16376 MiB, 33, 00000000:05:00.0
+```
+
+The ClusterPolicy is `ready`, and the role's vectorAdd pod printed
+`Test PASSED`. On the node, containerd's default runtime is still `runc`:
+the toolkit wrote `/etc/containerd/conf.d/99-nvidia.toml` (`enable_cdi =
+true`) at the root config's version and containerd kept running, so
+`RUNTIME_CONFIG_SOURCE=file` did its job, and the device plugin hands the GPU
+to containers through CDI (`/var/run/cdi/k8s.device-plugin.nvidia.com-gpu.json`).
+
+- Rerun: `changed=0` on all five hosts, 1m50s.
+- `ansible-lint --profile production`: passed.
+- `galaxy-importer` 0.4.44 on the built tarball: "Importer processing
+  completed successfully". The first try skipped its lint step ("ansible-lint
+  not found"): the importer looks for `ansible-lint` on `PATH`, so it runs
+  with its virtualenv's `bin` first on `PATH`, and then lints clean.
+
+### GPU workloads
+
+The GPU tests from an earlier project on this host, as `tests/gpu/`: one Job
+per test, run one after another (each takes the whole GPU), every image
+pinned by digest, in a namespace at the baseline Pod Security level. NVKE's
+API server has no Pod Security defaults of its own (no admission
+configuration file), so namespaces are privileged unless labelled.
+
+```text
+01-gpu-nvidia-smi            PASS        15s    RTX 4080 SUPER, 595.91.07, 16376 MiB
+02-gpu-cuda-vectoradd        PASS         5s    Test PASSED
+03-gpu-tensorflow            PASS        96s    TensorFlow 2.21.0, CUDA 12.5.1, cuDNN 9: conv2d and matmul on GPU:0
+04-gpu-pytorch               PASS        61s    PyTorch 2.14.1+cu132, cuDNN 92400: conv2d and matmul on cuda:0
+05-gpu-tensorrt              PASS       100s    TensorRT 11.3.0.99: engine built
+06-gpu-operator-metrics      PASS        10s    15 DCGM samples, 33 C
+```
+
+TensorRT 26.09 is built for a newer CUDA 13 than driver 595 ships, and runs
+under CUDA's minor version compatibility. `tests/` is left out of the Galaxy
+tarball (`build_ignore`).
