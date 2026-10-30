@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: Bootstrap an NVIDIA Kubernetes Engine (NVKE) management cluster - bootstrap host, TPM-attested nodes, nvkectl bootstrap site.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+  galaxy_tags: [nvke, nvidia, kubernetes, k8s, spire]
+dependencies: []

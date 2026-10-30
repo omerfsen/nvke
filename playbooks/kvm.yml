@@ -1,0 +1,140 @@
+---
+# NVKE on KVM/libvirt, in the order of NVKE's installation docs: the node
+# image; the bootstrap host and the site's SPIRE CA; the nodes, booted from the
+# image with the documented cloud-init user data (SPIRE pointed at the
+# bootstrap host, Kubernetes and OVN-Kubernetes packages installed); the BGP
+# peer for the API VIP; then the management cluster.
+#
+#   ansible-playbook -i inventory/kvm omerfsen.nvke.kvm
+
+- name: Node image
+  ansible.builtin.import_playbook: image.yml
+
+- name: Create the bootstrap VM
+  hosts: kvm_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    # Each hypervisor's NAT network is its own private subnet: VMs on
+    # different hypervisors could not reach each other.
+    - name: Several hypervisors need a shared bridge
+      ansible.builtin.assert:
+        that: groups['kvm_hosts'] | length == 1 or nvke_kvm_bridge | length > 0
+        fail_msg: With more than one hypervisor set nvke_kvm_bridge to a bridge on a network all of them share.
+        quiet: true
+      run_once: true
+
+    # NVKE moves each node's NIC into an Open vSwitch bridge, and OVS copies
+    # the NIC's MAC to the bridge only when it is globally administered
+    # (second-lowest bit of the first byte clear). Otherwise the bridge asks
+    # for DHCP with a random MAC and the node loses its reserved address.
+    - name: Node MACs are globally administered
+      ansible.builtin.assert:
+        that: (item.mac.split(':')[0] | int(base=16)) // 2 % 2 == 0
+        fail_msg: >-
+          {{ item.name }}: {{ item.mac }} is a locally administered MAC (first byte
+          like 02, 52, fe). Use one whose first byte has that bit clear, e.g.
+          00:16:3e:xx:xx:xx, or NVKE's Open vSwitch bridge loses the node's address.
+        quiet: true
+      loop: "{{ nvke_kvm_vms | selectattr('group', 'eq', 'nvke_nodes') | list }}"
+      loop_control: {label: "{{ item.name }}"}
+      run_once: true
+
+    - name: Create the bootstrap VM if it is placed on this hypervisor
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.libvirt_vm
+      vars:
+        libvirt_vm_name: "{{ nvke_kvm_vm.name }}"
+        libvirt_vm_ip: "{{ nvke_kvm_vm.ip }}"
+        libvirt_vm_mac: "{{ nvke_kvm_vm.mac }}"
+        libvirt_vm_vcpus: "{{ nvke_kvm_vm.vcpus }}"
+        libvirt_vm_memory_mb: "{{ nvke_kvm_vm.memory_mb }}"
+        libvirt_vm_disk_gb: "{{ nvke_kvm_vm.disk_gb }}"
+        libvirt_vm_network: "{{ nvke_kvm_network }}"
+        libvirt_vm_bridge: "{{ nvke_kvm_bridge }}"
+        libvirt_vm_addressing: dhcp
+        libvirt_vm_disk_path: "{{ nvke_kvm_disk_path }}"
+        libvirt_vm_ssh_key_dir: "{{ nvke_kvm_ssh_key_dir }}"
+      loop: "{{ nvke_kvm_vms | selectattr('group', 'eq', 'nvke_bootstrap') | selectattr('kvm_host', 'eq', inventory_hostname) | list }}"
+      loop_control: {loop_var: nvke_kvm_vm, label: "{{ nvke_kvm_vm.name }}"}
+
+    - name: Add every VM to the NVKE groups
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: ["{{ item.group }}"]
+        ansible_host: "{{ item.ip }}"
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: "{{ nvke_kvm_ssh_key_dir | expanduser }}/{{ item.name }}_ed25519"
+        ansible_ssh_common_args: >-
+          -o StrictHostKeyChecking=accept-new
+          {{ ('-o ProxyJump=' ~ (hostvars[item.kvm_host].ansible_user ~ '@' if hostvars[item.kvm_host].ansible_user is defined else '')
+              ~ hostvars[item.kvm_host].ansible_host | default(item.kvm_host)) if nvke_kvm_jump | bool else '' }}
+        nvke_node_ip: "{{ item.ip }}"
+      vars:
+        nvke_kvm_jump: >-
+          {{ (nvke_kvm_proxy_jump | string | lower == 'true')
+             or (nvke_kvm_proxy_jump | string | lower == 'auto'
+                 and hostvars[item.kvm_host].ansible_connection | default('ssh') != 'local'
+                 and nvke_kvm_bridge | length == 0) }}
+      loop: "{{ nvke_kvm_vms }}"
+      loop_control: {label: "{{ item.name }} on {{ item.kvm_host }}"}
+      run_once: true
+      changed_when: false
+
+# The nodes need the bootstrap host's address and the SPIRE CA certificate in
+# their first-boot user data, so the bootstrap host is prepared first.
+- name: Prepare the bootstrap host
+  hosts: nvke_bootstrap[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Runtime, tools, nvkectl, images, SPIRE CA and node user data
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.nvke
+        tasks_from: bootstrap_host
+
+- name: Create the nodes
+  hosts: kvm_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create the nodes placed on this hypervisor
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.libvirt_vm
+      vars:
+        libvirt_vm_name: "{{ nvke_kvm_vm.name }}"
+        libvirt_vm_ip: "{{ nvke_kvm_vm.ip }}"
+        libvirt_vm_mac: "{{ nvke_kvm_vm.mac }}"
+        libvirt_vm_vcpus: "{{ nvke_kvm_vm.vcpus }}"
+        libvirt_vm_memory_mb: "{{ nvke_kvm_vm.memory_mb }}"
+        libvirt_vm_disk_gb: "{{ nvke_kvm_vm.disk_gb }}"
+        libvirt_vm_tpm: true
+        libvirt_vm_image_path: "{{ hostvars[groups['kvm_hosts'][0]].node_image_path }}"
+        libvirt_vm_cloud_config: "{{ hostvars[groups['nvke_bootstrap'][0]].nvke_node_cloud_config }}"
+        libvirt_vm_network: "{{ nvke_kvm_network }}"
+        libvirt_vm_bridge: "{{ nvke_kvm_bridge }}"
+        libvirt_vm_addressing: dhcp
+        libvirt_vm_disk_path: "{{ nvke_kvm_disk_path }}"
+        libvirt_vm_ssh_key_dir: "{{ nvke_kvm_ssh_key_dir }}"
+      loop: "{{ nvke_kvm_vms | selectattr('group', 'eq', 'nvke_nodes') | selectattr('kvm_host', 'eq', inventory_hostname) | list }}"
+      loop_control: {loop_var: nvke_kvm_vm, label: "{{ nvke_kvm_vm.name }}"}
+
+- name: BGP peer for the API VIP
+  hosts: kvm_hosts[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: FRR on the nodes' gateway
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.bgp_peer
+      vars:
+        bgp_peer_address: "{{ nvke_kvm_gateway }}"
+        bgp_peer_neighbors: "{{ nvke_kvm_vms | selectattr('group', 'eq', 'nvke_nodes') | map(attribute='ip') | list }}"
+        bgp_peer_vip_prefixes: ["{{ nvke_kvm_vip_prefix }}"]
+      when:
+        - nvke_kvm_vms | selectattr('group', 'eq', 'nvke_nodes') | list | length > 1
+        - (nvke_kvm_bgp_peer | string | lower == 'true')
+          or (nvke_kvm_bgp_peer | string | lower == 'auto' and nvke_kvm_bridge | length == 0)
+
+- name: NVKE management cluster
+  ansible.builtin.import_playbook: cluster.yml

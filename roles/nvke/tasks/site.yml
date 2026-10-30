@@ -1,0 +1,187 @@
+---
+# Forms the management cluster from the prepared nodes with
+# `nvkectl bootstrap site`, once: a cluster whose kubeconfig answers is left
+# alone. Then the kubeconfig, the etcd encryption key and the SPIRE entries
+# go to the controller. Runs on the bootstrap host after the bootstrap_host
+# entry point (same play or an earlier one) and the node entry point on every
+# node.
+
+- name: Paths on the bootstrap host
+  ansible.builtin.set_fact:
+    nvke_site_dir: "{{ nvke_workdir }}/{{ nvke_cluster_name }}"
+    nvke_site_kubeconfig: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/{{ nvke_cluster_name }}.kubeconfig"
+    nvke_site_key: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/{{ nvke_cluster_name }}-etcd-encryption-key.json"
+    nvke_controller_image: nke-controller:{{ nvke_version }}
+    nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
+
+- name: The site is valid
+  ansible.builtin.assert:
+    that:
+      - nvke_cluster_name is match('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
+      - nvke_site_nodes | length in [1, 3, 5, 7]
+      - nvke_site_nodes | length == 1 or nvke_vip | length > 0
+      - nvke_site_nodes | selectattr('tpm', 'match', '^[0-9a-f]{64}$') | list | length == nvke_site_nodes | length
+    fail_msg: >-
+      nvke_cluster_name is a lower-case DNS label; the site has an odd number of
+      nodes (1, 3, 5 or 7), a VIP (nvke_vip) with more than one, and a TPM
+      thumbprint for every node (run the node entry point on each first).
+    quiet: true
+
+- name: Does a kubeconfig from an earlier bootstrap exist?
+  ansible.builtin.stat:
+    path: "{{ nvke_site_kubeconfig }}"
+  register: nvke_site_kubeconfig_stat
+
+- name: Does that cluster answer?
+  ansible.builtin.command: kubectl --kubeconfig {{ nvke_site_kubeconfig }} get --raw /readyz --request-timeout=10s
+  register: nvke_site_ready
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: nvke_site_kubeconfig_stat.stat.exists
+  environment: "{{ nvke_build_env }}"
+
+- name: Bootstrap the management cluster
+  when: nvke_site_ready.rc | default(1) != 0
+  vars:
+    nvke_ca_env:
+      NVKECTL_SPIRE_CA_CERT_FILE: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/spire-ca.crt"
+      NVKECTL_SPIRE_CA_KEY_FILE: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/spire-ca.key"
+    nvke_github_env: "{{ {'GITHUB_TOKEN': nvke_github_token} if nvke_github_token | length > 0 else {} }}"
+  block:
+    - name: Nodes file
+      ansible.builtin.copy:
+        dest: "{{ nvke_site_dir }}/hosts.csv"
+        mode: "0644"
+        content: |
+          name,ip,tpm_ek_thumbprint
+          {% for n in nvke_site_nodes %}
+          {{ n.name }},{{ n.ip }},{{ n.tpm }}
+          {% endfor %}
+
+    - name: Generate the site spec
+      ansible.builtin.command:
+        argv: "{{ ['nvkectl', 'generate', 'sitespec', nvke_cluster_name, '--nodes', 'hosts.csv']
+                  + (nvke_sitespec_sets | map('regex_replace', '^', '--set=') | list) }}"
+        chdir: "{{ nvke_site_dir }}"
+      vars:
+        nvke_sitespec_sets: >-
+          {{ ['cluster.k8sVersion=' ~ nvke_k8s_version]
+             + (['cluster.controlPlaneVIP=' ~ nvke_vip] if nvke_vip | length > 0 else [])
+             + ['cluster.podCidr=' ~ nvke_pod_cidr,
+                'cluster.serviceCidr=' ~ nvke_service_cidr,
+                'cluster.kubeletConfig.systemReservedMemory=' ~ nvke_system_reserved_memory,
+                'spire.trustDomain=' ~ nvke_trust_domain,
+                'spire.upstreamCA=true']
+             + ([] if nvke_etcd_encryption | bool else ['cluster.etcdEncryption=false']) }}
+      environment: "{{ nvke_build_env }}"
+      register: nvke_sitespec
+      changed_when: false
+
+    - name: Write the site spec
+      ansible.builtin.copy:
+        dest: "{{ nvke_site_dir }}/sitespec.yaml"
+        content: "{{ nvke_sitespec.stdout }}\n"
+        mode: "0644"
+
+    - name: Validate it (touches no node)
+      ansible.builtin.command:
+        cmd: nvkectl bootstrap site -f sitespec.yaml --dry-run
+        chdir: "{{ nvke_site_dir }}"
+      environment: "{{ nvke_build_env | combine(nvke_ca_env) }}"
+      changed_when: false
+
+    # nvkectl refuses to start over a leftover seed cluster, a leftover key
+    # file or a node already serving 6443, and never cleans those up itself;
+    # its message names the fix (see docs/troubleshooting.md).
+    - name: Run nvkectl bootstrap site, 10-20 minutes, logging to bootstrap.log
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          nvkectl bootstrap site -f sitespec.yaml
+          --nvke-controller-image {{ nvke_controller_image }}
+          --provisioned-provider-image {{ nvke_provisioned_image }}
+          --timeout {{ nvke_bootstrap_timeout }}
+          2>&1 | tee -a bootstrap.log
+        chdir: "{{ nvke_site_dir }}"
+        executable: /bin/bash
+      environment: "{{ nvke_build_env | combine(nvke_ca_env) | combine(nvke_github_env) }}"
+      async: 5400
+      poll: 30
+      changed_when: true
+
+# ── Verify ───────────────────────────────────────────────────────────────
+- name: Wait until every node is Ready
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ nvke_site_kubeconfig }} get nodes
+    -o jsonpath='{range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+  register: nvke_site_nodes_ready
+  environment: "{{ nvke_build_env }}"
+  changed_when: false
+  check_mode: false
+  retries: 30
+  delay: 10
+  until: >-
+    nvke_site_nodes_ready.rc == 0
+    and nvke_site_nodes_ready.stdout_lines | select('match', '.*=True$') | list | length == nvke_site_nodes | length
+
+# The other two checks of the Verify list on NVKE's bootstrap page.
+- name: The control-plane NoSchedule taint is gone
+  ansible.builtin.command: kubectl --kubeconfig {{ nvke_site_kubeconfig }} get nodes -o jsonpath={.items[*].spec.taints}
+  register: nvke_site_taints
+  environment: "{{ nvke_build_env }}"
+  changed_when: false
+  check_mode: false
+  failed_when: nvke_site_taints.rc != 0 or 'node-role.kubernetes.io/control-plane' in nvke_site_taints.stdout
+
+- name: The seed cluster is gone
+  ansible.builtin.command: kind get clusters
+  register: nvke_seed_clusters
+  environment: "{{ nvke_build_env | combine({'KIND_EXPERIMENTAL_PROVIDER': 'nerdctl'}) }}"
+  changed_when: false
+  check_mode: false
+  failed_when: nvke_seed_clusters.rc != 0 or 'nvkectl-bootstrap' in nvke_seed_clusters.stdout_lines
+
+# ── Hand the outputs to the controller ───────────────────────────────────
+- name: Credentials directory on the controller
+  ansible.builtin.file:
+    path: "{{ nvke_credentials_dir | expanduser }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Which bootstrap outputs are on the bootstrap host?
+  ansible.builtin.stat:
+    path: "{{ nvke_site_dir }}/{{ item }}"
+  loop:
+    - "{{ nvke_cluster_name }}-etcd-encryption-key.json"
+    - clusterstaticentry-crd.yaml
+    - clusterstaticentries.yaml
+  register: nvke_site_outputs
+
+- name: Copy them to the controller
+  ansible.builtin.fetch:
+    src: "{{ item.stat.path }}"
+    dest: "{{ nvke_credentials_dir | expanduser }}/{{ item.item }}"
+    flat: true
+  loop: "{{ nvke_site_outputs.results | selectattr('stat.exists') | list }}"
+  loop_control: {label: "{{ item.item }}"}
+
+- name: Key file permissions on the controller
+  ansible.builtin.file:
+    path: "{{ nvke_credentials_dir | expanduser }}/{{ nvke_cluster_name }}-etcd-encryption-key.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  when: nvke_site_outputs.results[0].stat.exists
+
+# The bootstrap host is the last place besides the nodes that holds it.
+- name: Remove the etcd key file from the bootstrap host
+  ansible.builtin.file:
+    path: "{{ nvke_site_key }}"
+    state: absent
+  when: nvke_remove_key_from_bootstrap_host | bool
+
+- name: Export the kubeconfig
+  ansible.builtin.include_tasks: kubeconfig.yml

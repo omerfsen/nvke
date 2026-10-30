@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: FRR BGP peer on the nodes' gateway that installs the NVKE API VIP announced by kube-vip.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: EL
+      versions: ["9", "10"]
+  galaxy_tags: [nvke, bgp, frr, kubevip]
+dependencies: []

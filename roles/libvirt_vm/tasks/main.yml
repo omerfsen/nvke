@@ -1,0 +1,310 @@
+---
+# One UEFI guest on libvirt from a qcow2 or cloud image: an SSH keypair (on
+# the controller, so it can reach the guest), a DHCP reservation or a static
+# address, a cloud-init seed, an optional TPM 2.0, then virt-install. Runs on
+# the KVM host.
+
+- name: Name and address are set
+  ansible.builtin.assert:
+    that:
+      - libvirt_vm_name | length > 0
+      - libvirt_vm_ip | length > 0
+      - libvirt_vm_addressing in ['dhcp', 'static']
+    fail_msg: Set libvirt_vm_name and libvirt_vm_ip; libvirt_vm_addressing is dhcp or static.
+    quiet: true
+
+- name: Installed packages on the KVM host
+  ansible.builtin.package_facts:
+
+# The apt cache is refreshed only when something is missing.
+- name: Tools to create the VM
+  ansible.builtin.apt:
+    name: "{{ libvirt_vm_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: libvirt_vm_packages | reject('in', ansible_facts.packages) | list | length > 0
+
+- name: Use the given MAC, or derive a stable one from the name
+  ansible.builtin.set_fact:
+    libvirt_vm_mac_address: >-
+      {{ libvirt_vm_mac if libvirt_vm_mac | length > 0
+         else libvirt_vm_mac_prefix ~ ':' ~ ((libvirt_vm_name | hash('sha256'))[0:6] | regex_replace('(..)(..)(..)', '\1:\2:\3')) }}
+    libvirt_vm_base_image: >-
+      {{ libvirt_vm_image_path if libvirt_vm_image_path | length > 0
+         else libvirt_vm_disk_path ~ '/' ~ libvirt_vm_image_url | basename }}
+
+- name: The MAC is valid
+  ansible.builtin.assert:
+    that: libvirt_vm_mac_address is match('^([0-9a-f]{2}:){5}[0-9a-f]{2}$')
+    fail_msg: "libvirt_vm_mac {{ libvirt_vm_mac_address }} is not a lower-case MAC address."
+    quiet: true
+
+# ── Dedicated keypair, on the controller ─────────────────────────────────
+- name: Key directory on the controller
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_ssh_key_dir | expanduser }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Generate the VM's SSH keypair
+  ansible.builtin.command: >-
+    ssh-keygen -q -t ed25519 -N '' -C ansible@{{ libvirt_vm_name }}
+    -f {{ libvirt_vm_ssh_key_path }}
+  args:
+    creates: "{{ libvirt_vm_ssh_key_path }}"
+  delegate_to: localhost
+  become: false
+
+- name: Read the public key
+  ansible.builtin.slurp:
+    src: "{{ libvirt_vm_ssh_key_path }}.pub"
+  delegate_to: localhost
+  become: false
+  register: libvirt_vm_pubkey
+
+# ── Disk: a copy of the base image, grown to size ────────────────────────
+- name: Fetch the base image once (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ libvirt_vm_image_url }}"
+    dest: "{{ libvirt_vm_base_image }}"
+    checksum: "{{ libvirt_vm_image_checksum }}"
+    mode: "0644"
+    timeout: 120
+  when: libvirt_vm_image_path | length == 0
+
+- name: The base image is there
+  ansible.builtin.stat:
+    path: "{{ libvirt_vm_base_image }}"
+    get_checksum: false
+  register: libvirt_vm_base_stat
+  failed_when: not libvirt_vm_base_stat.stat.exists
+
+- name: Copy the base image to the VM's disk
+  ansible.builtin.copy:
+    src: "{{ libvirt_vm_base_image }}"
+    dest: "{{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}.qcow2"
+    remote_src: true
+    force: false
+    mode: "0600"
+
+- name: Check whether the domain already exists
+  ansible.builtin.command: virsh dominfo {{ libvirt_vm_name }}
+  register: libvirt_vm_dominfo
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Read the disk's virtual size
+  ansible.builtin.command: qemu-img info --force-share --output=json {{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}.qcow2
+  register: libvirt_vm_disk_info
+  changed_when: false
+  check_mode: false
+
+# Sizes apply at creation: the disk is grown only while the VM does not exist
+# yet, before its first boot (the guest grows its root filesystem then). An
+# existing VM's disk is never touched.
+- name: Grow it to the requested size
+  ansible.builtin.command: qemu-img resize {{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}.qcow2 {{ libvirt_vm_disk_gb }}G
+  when:
+    - libvirt_vm_dominfo.rc != 0
+    - (libvirt_vm_disk_info.stdout | from_json)['virtual-size'] < (libvirt_vm_disk_gb | int) * 1024 ** 3
+  changed_when: true
+
+# ── Address: a DHCP reservation in the libvirt network ───────────────────
+# Kept in the network's live and persistent definition. An entry for this MAC
+# with another address or name is updated; an address another MAC holds is an
+# error, never taken over.
+- name: Reserve the address in the libvirt network
+  ansible.builtin.shell: |
+    set -euo pipefail
+    net={{ libvirt_vm_network | quote }} mac={{ libvirt_vm_mac_address | quote }}
+    name={{ libvirt_vm_name | quote }} ip={{ libvirt_vm_ip | quote }}
+    entry="<host mac='$mac' name='$name' ip='$ip'/>"
+    hosts=$(virsh net-dumpxml "$net" | grep "<host mac=" || true)
+    if grep -qF "$entry" <<<"$hosts"; then exit 0; fi
+    if grep -F "ip='$ip'" <<<"$hosts" | grep -vqF "mac='$mac'"; then
+      echo "$ip is reserved for another MAC in network $net" >&2; exit 1
+    fi
+    if grep -qF "<host mac='$mac'" <<<"$hosts"; then
+      virsh net-update "$net" modify ip-dhcp-host "$entry" --live --config >/dev/null
+    else
+      virsh net-update "$net" add-last ip-dhcp-host "$entry" --live --config >/dev/null
+    fi
+    echo reserved
+  args: {executable: /bin/bash}
+  register: libvirt_vm_reservation
+  changed_when: "'reserved' in libvirt_vm_reservation.stdout"
+  when:
+    - libvirt_vm_addressing == 'dhcp'
+    - libvirt_vm_bridge | length == 0
+    - not ansible_check_mode
+
+# dnsmasq never hands a reserved address to a new MAC while an older lease
+# for it is alive (an hour on libvirt), e.g. from a VM destroyed and rebuilt
+# with another MAC. A lease held by a MAC no defined domain has is released;
+# one held by an existing VM is an error.
+- name: Release a stale lease on the address
+  ansible.builtin.shell: |
+    set -euo pipefail
+    net={{ libvirt_vm_network | quote }} ip={{ libvirt_vm_ip | quote }} mac={{ libvirt_vm_mac_address | quote }}
+    br=$(virsh net-info "$net" | awk '/^Bridge:/ {print $2}')
+    status=/var/lib/libvirt/dnsmasq/$br.status
+    [ -s "$status" ] || exit 0
+    holder=$(python3 -c 'import json, sys
+    for lease in json.load(open(sys.argv[1])):
+        if lease.get("ip-address") == sys.argv[2]:
+            print(lease.get("mac-address", "").lower())' "$status" "$ip")
+    if [ -z "$holder" ] || [ "$holder" = "$mac" ]; then exit 0; fi
+    for d in $(virsh list --all --name); do
+      if virsh domiflist "$d" | grep -qi "$holder"; then
+        echo "$ip is leased to $holder, a NIC of VM $d" >&2; exit 1
+      fi
+    done
+    dhcp_release "$br" "$ip" "$holder"
+    echo released
+  args: {executable: /bin/bash}
+  register: libvirt_vm_lease
+  changed_when: "'released' in libvirt_vm_lease.stdout"
+  when:
+    - libvirt_vm_addressing == 'dhcp'
+    - libvirt_vm_bridge | length == 0
+    - libvirt_vm_dominfo.rc != 0
+    - not ansible_check_mode
+
+# ── cloud-init: hostname, our key, and the address when static ───────────
+# Built once: the seed only matters for the guest's first boot.
+- name: The guest's cloud-config
+  ansible.builtin.set_fact:
+    libvirt_vm_user_data: >-
+      {{ {'hostname': libvirt_vm_name,
+          'fqdn': libvirt_vm_name,
+          'users': [{'name': libvirt_vm_user,
+                     'sudo': 'ALL=(ALL) NOPASSWD:ALL',
+                     'shell': '/bin/bash',
+                     'lock_passwd': true,
+                     'ssh_authorized_keys': [libvirt_vm_pubkey.content | b64decode | trim]}],
+          'ssh_pwauth': false}
+         | combine(libvirt_vm_cloud_config) }}
+
+- name: Is the seed ISO already built?
+  ansible.builtin.stat:
+    path: "{{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}-seed.iso"
+  register: libvirt_vm_seed_iso
+
+- name: Build and pack the cloud-init seed
+  when: not libvirt_vm_seed_iso.stat.exists
+  block:
+    - name: Stage directory for the seed files
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "seed-{{ libvirt_vm_name }}-"
+      register: libvirt_vm_seed_dir
+
+    - name: Write the seed files
+      ansible.builtin.copy:
+        dest: "{{ libvirt_vm_seed_dir.path }}/{{ libvirt_vm_seed_file.name }}"
+        mode: "0644"
+        content: "{{ libvirt_vm_seed_file.content }}"
+      when: libvirt_vm_seed_file.content | length > 0
+      loop:
+        - name: meta-data
+          content: |
+            instance-id: {{ libvirt_vm_name }}
+            local-hostname: {{ libvirt_vm_name }}
+        - name: user-data
+          content: "#cloud-config\n{{ libvirt_vm_user_data | to_nice_yaml(indent=2, width=1000) }}"
+        - name: network-config
+          content: |
+            {% if libvirt_vm_addressing == 'static' %}
+            version: 2
+            ethernets:
+              eth0:
+                # By MAC: the interface name differs between images.
+                match: {macaddress: "{{ libvirt_vm_mac_address }}"}
+                set-name: eth0
+                dhcp4: false
+                addresses: [{{ libvirt_vm_ip }}/{{ libvirt_vm_prefix }}]
+                routes:
+                  - to: 0.0.0.0/0
+                    via: {{ libvirt_vm_gateway }}
+                nameservers:
+                  addresses: {{ libvirt_vm_dns | to_json }}
+            {% endif %}
+      loop_control: {loop_var: libvirt_vm_seed_file, label: "{{ libvirt_vm_seed_file.name }}"}
+
+    - name: Pack the seed ISO
+      ansible.builtin.command:
+        cmd: >-
+          genisoimage -output {{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}-seed.iso
+          -volid cidata -joliet -rock .
+        chdir: "{{ libvirt_vm_seed_dir.path }}"
+        creates: "{{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}-seed.iso"
+
+  always:
+    - name: Remove the staged seed files
+      ansible.builtin.file:
+        path: "{{ libvirt_vm_seed_dir.path }}"
+        state: absent
+      when: libvirt_vm_seed_dir.path is defined
+
+# ── Define and start the domain ──────────────────────────────────────────
+- name: Create the VM
+  ansible.builtin.command: >-
+    virt-install
+    --name {{ libvirt_vm_name }}
+    --vcpus {{ libvirt_vm_vcpus }}
+    --memory {{ libvirt_vm_memory_mb }}
+    --cpu host-passthrough
+    --machine q35
+    --boot loader={{ libvirt_vm_ovmf_code }},loader.readonly=yes,loader.type=pflash,nvram.template={{ libvirt_vm_ovmf_vars }}
+    --disk path={{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}.qcow2,format=qcow2,bus=virtio
+    --disk path={{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}-seed.iso,device=cdrom
+    --network {{ libvirt_vm_nic }},model=virtio,mac={{ libvirt_vm_mac_address }}
+    {{ '--tpm backend.type=emulator,backend.version=2.0,model=tpm-tis' if libvirt_vm_tpm else '' }}
+    --graphics none
+    --console pty,target_type=serial
+    --osinfo {{ libvirt_vm_osinfo }}
+    --import
+    --noautoconsole
+  vars:
+    libvirt_vm_nic: "{{ ('bridge=' ~ libvirt_vm_bridge) if libvirt_vm_bridge | length > 0 else ('network=' ~ libvirt_vm_network) }}"
+  when: libvirt_vm_dominfo.rc != 0 and not ansible_check_mode
+  changed_when: true
+
+# A new guest has new host keys; an old entry for its address (an earlier VM)
+# would make SSH refuse it.
+- name: Forget an old host key for the address on the controller
+  ansible.builtin.command: ssh-keygen -R {{ libvirt_vm_ip }}
+  delegate_to: localhost
+  become: false
+  register: libvirt_vm_known_hosts
+  changed_when: "'updated' in libvirt_vm_known_hosts.stdout"
+  failed_when: false
+  when: libvirt_vm_dominfo.rc != 0 and not ansible_check_mode
+
+- name: Set whether the domain starts with the host
+  ansible.builtin.command: virsh autostart {{ '' if libvirt_vm_autostart else '--disable ' }}{{ libvirt_vm_name }}
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Start the guest if it is shut off
+  ansible.builtin.shell: |
+    set -o pipefail
+    if [ "$(virsh domstate {{ libvirt_vm_name }})" = "shut off" ]; then
+      virsh start {{ libvirt_vm_name }} >/dev/null && echo started
+    fi
+  args: {executable: /bin/bash}
+  register: libvirt_vm_started
+  changed_when: "'started' in libvirt_vm_started.stdout"
+  when: not ansible_check_mode
+
+- name: Wait for SSH on its address
+  ansible.builtin.wait_for:
+    host: "{{ libvirt_vm_ip }}"
+    port: 22
+    timeout: 900
+    delay: 10
+  when: not ansible_check_mode

@@ -1,0 +1,58 @@
+---
+# NVKE source the image is built from: a release tag and the commit it must
+# resolve to, so a moved tag fails the build instead of building something else.
+node_image_nvke_version: v0.22.0
+node_image_nvke_commit: 400c24fb6465b042be883d6b62472528520d6291
+node_image_nvke_repo: https://github.com/dsx-ai-factory/nvke.git
+
+# What to build. The non-FDE variant is the one the bootstrap documents; FDE
+# images share one disk key across every node and are for evaluation only.
+node_image_variant: non-fde
+node_image_ubuntu_release: 26.04.1
+
+# Working directory for the checkout, toolchain, ISO cache and Go caches
+# (about 40 GiB at peak). Put it on a large disk.
+node_image_build_dir: /var/lib/nvke-build
+# Where the finished image is copied to, on the build host.
+node_image_dest_dir: /var/lib/libvirt/images
+# Remove the Packer output after the copy (it is the same image again).
+node_image_keep_build_output: false
+# Local port the smoke test forwards to the test VM's SSH.
+node_image_smoke_ssh_port: 2222
+# Build guest resources and the wall-clock limit for one build.
+node_image_build_cpus: 4
+node_image_build_memory_mib: 8192
+node_image_build_timeout: 7200
+
+# Toolchain, pinned with checksums. Go must match the repository's go.work;
+# Packer is the version os-image/packer/versions.pkr.hcl requires.
+node_image_go_version: 1.27.3
+node_image_go_sha256:
+  amd64: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+  arm64: a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+node_image_packer_version: 1.15.4
+node_image_packer_sha256:
+  amd64: 15f97a6a99645c7d5308c609973b5280837b38e112beac413ccbce80da927cf1
+  arm64: 23e6d2e596dd9e2527e0f7bea9aedd26059729375a0d17c462c2621f1b97b82d
+
+# Build host packages (Debian/Ubuntu), from the repository's image workflow.
+node_image_packages:
+  - build-essential
+  - cloud-image-utils
+  - curl
+  - dpkg-dev
+  - genisoimage
+  - git
+  - gpg
+  - jq
+  - libguestfs-tools
+  - make
+  - ovmf
+  - p7zip-full
+  - python3
+  - qemu-system-x86
+  - qemu-utils
+  - swtpm
+  - swtpm-tools
+  - unzip
+  - xorriso

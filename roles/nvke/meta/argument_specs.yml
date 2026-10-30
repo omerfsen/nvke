@@ -1,0 +1,244 @@
+---
+argument_specs:
+  bootstrap_host:
+    short_description: 'Prepare the bootstrap host: runtime, tools, nvkectl, seed-cluster images and the SPIRE CA.'
+    description:
+      - Installs nerdctl-full (containerd, buildkitd, CNI plugins) as a standalone runtime with its own units and socket,
+      - next to any Docker, plus kind, kubectl, clusterctl, Helm and Go at the versions NVKE pins, all checksum verified.
+      - Builds nvkectl and the controller and provisioned-provider images from the pinned NVKE release.
+      - Creates or copies the site's SPIRE CA and opens TCP 30081 to the nodes. Runs as root on a Debian/Ubuntu host with systemd.
+      - Builds the nodes' first-boot user data from NVKE's Prepare nodes page into C(nvke_node_cloud_config).
+      - Saves it as C(node-user-data.yaml) in O(nvke_credentials_dir), for provisioning the nodes.
+    author: Omer Sen
+    options:
+      nvke_version:
+        type: str
+        default: v0.22.0
+        description: NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from.
+      nvke_commit:
+        type: str
+        default: 400c24fb6465b042be883d6b62472528520d6291
+        description: Commit the tag must resolve to.
+      nvke_repo:
+        type: str
+        default: https://github.com/dsx-ai-factory/nvke.git
+        description: NVKE Git repository.
+      nvke_cluster_name:
+        type: str
+        default: nvke-mgmt
+        description: Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory.
+      nvke_workdir:
+        type: path
+        default: /var/lib/nvke
+        description: 'Working directory on the bootstrap host: downloads, checkout, Go, and one directory per cluster.'
+      nvke_spire_ca_cert_file:
+        type: path
+        default: ''
+        description: Your SPIRE CA certificate (PEM) on the controller. Empty generates a self-signed ECDSA P-256 CA on the bootstrap host.
+      nvke_spire_ca_key_file:
+        type: path
+        default: ''
+        description: Key of O(nvke_spire_ca_cert_file), on the controller.
+      nvke_spire_ca_days:
+        type: int
+        default: 3650
+        description: Validity of a generated SPIRE CA, in days.
+      nvke_credentials_dir:
+        type: path
+        description: Directory on the controller for the etcd encryption key, the SPIRE CA and the SPIRE entries. Default C(~/.nvke/<cluster>).
+      nvke_site_nodes:
+        type: list
+        elements: dict
+        description:
+          - The nodes as C(name), C(ip) and C(tpm).
+          - Default built from the C(nvke_nodes) group (C(nvke_node_name), C(nvke_node_ip) or C(ansible_host),
+          - and the thumbprint the node entry point read).
+      nvke_firewall:
+        type: str
+        default: auto
+        choices:
+          - auto
+          - ufw
+          - firewalld
+          - none
+        description: Where to open TCP 30081 on the bootstrap host to the nodes. C(auto) picks an active ufw, else a running firewalld.
+      nvke_nerdctl_version:
+        type: str
+        default: 2.3.5
+        description: nerdctl version (NVKE pin).
+      nvke_nerdctl_sha256:
+        type: dict
+        description: SHA-256 of the nerdctl download per architecture (C(amd64), C(arm64)).
+      nvke_kind_version:
+        type: str
+        default: v0.32.0
+        description: kind version (NVKE pin).
+      nvke_kind_sha256:
+        type: dict
+        description: SHA-256 of the kind download per architecture (C(amd64), C(arm64)).
+      nvke_kubectl_version:
+        type: str
+        default: v1.36.0
+        description: kubectl version (NVKE pin).
+      nvke_kubectl_sha256:
+        type: dict
+        description: SHA-256 of the kubectl download per architecture (C(amd64), C(arm64)).
+      nvke_clusterctl_version:
+        type: str
+        default: v1.13.6
+        description: clusterctl version (NVKE pin).
+      nvke_clusterctl_sha256:
+        type: dict
+        description: SHA-256 of the clusterctl download per architecture (C(amd64), C(arm64)).
+      nvke_helm_version:
+        type: str
+        default: v4.2.4
+        description: helm version (NVKE pin).
+      nvke_helm_sha256:
+        type: dict
+        description: SHA-256 of the helm download per architecture (C(amd64), C(arm64)).
+      nvke_go_version:
+        type: str
+        default: 1.27.3
+        description: go version (NVKE pin).
+      nvke_go_sha256:
+        type: dict
+        description: SHA-256 of the go download per architecture (C(amd64), C(arm64)).
+      nvke_bootstrap_ip:
+        type: str
+        description: Address the nodes reach the bootstrap host at (SPIRE, TCP 30081). Default the bootstrap host's C(nvke_node_ip) or C(ansible_host).
+      nvke_trust_domain:
+        type: str
+        description: SPIFFE trust domain of the site. Default C(<cluster>.nvke.internal).
+      nvke_k8s_version:
+        type: str
+        default: 1.36.3
+        description: Kubernetes version without a leading C(v). The node image must stage it; NVKE supports C(1.36.3).
+      nvke_cni_version:
+        type: str
+        default: 2.4.2
+        description: OVN-Kubernetes version staged on the node image.
+  node:
+    short_description: Prepare one management-cluster node built from the NVKE node image.
+    description:
+      - Points the node's SPIRE agent at the bootstrap host with the site's trust domain and trust bundle,
+      - and restarts the agents when that changes.
+      - Installs the Kubernetes and OVN-Kubernetes packages the image stages,
+      - and reads the TPM endorsement key thumbprint into C(nvke_tpm_ek_thumbprint).
+    author: Omer Sen
+    options:
+      nvke_spire_trust_bundle:
+        type: str
+        required: true
+        description: The SPIRE CA certificate, PEM. Set by the playbooks from the bootstrap host.
+      nvke_bootstrap_ip:
+        type: str
+        description: Address the nodes reach the bootstrap host at (SPIRE, TCP 30081). Default the bootstrap host's C(nvke_node_ip) or C(ansible_host).
+      nvke_trust_domain:
+        type: str
+        description: SPIFFE trust domain of the site. Default C(<cluster>.nvke.internal).
+      nvke_cluster_name:
+        type: str
+        default: nvke-mgmt
+        description: Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory.
+      nvke_k8s_version:
+        type: str
+        default: 1.36.3
+        description: Kubernetes version without a leading C(v). The node image must stage it; NVKE supports C(1.36.3).
+      nvke_cni_version:
+        type: str
+        default: 2.4.2
+        description: OVN-Kubernetes version staged on the node image.
+  site:
+    short_description: Bootstrap the management cluster with nvkectl and export its kubeconfig and keys.
+    description:
+      - Writes the nodes file and site spec,
+      - validates it and runs C(nvkectl bootstrap site) once; a cluster whose kubeconfig answers is left alone.
+      - Waits for every node to be Ready, copies the etcd encryption key and SPIRE entries to the controller,
+      - removes the key from the bootstrap host, and writes the admin kubeconfig.
+      - Runs on the bootstrap host after the bootstrap_host entry point and the node entry point on every node.
+    author: Omer Sen
+    options:
+      nvke_version:
+        type: str
+        default: v0.22.0
+        description: NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from.
+      nvke_cluster_name:
+        type: str
+        default: nvke-mgmt
+        description: Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory.
+      nvke_site_nodes:
+        type: list
+        elements: dict
+        description:
+          - The nodes as C(name), C(ip) and C(tpm).
+          - Default built from the C(nvke_nodes) group (C(nvke_node_name), C(nvke_node_ip) or C(ansible_host),
+          - and the thumbprint the node entry point read).
+      nvke_k8s_version:
+        type: str
+        default: 1.36.3
+        description: Kubernetes version without a leading C(v). The node image must stage it; NVKE supports C(1.36.3).
+      nvke_cni_version:
+        type: str
+        default: 2.4.2
+        description: OVN-Kubernetes version staged on the node image.
+      nvke_vip:
+        type: str
+        default: ''
+        description:
+          - Kubernetes API VIP, required with more than one node.
+          - Announced by kube-vip over BGP to each node's default gateway (AS 65100 to AS 4294967000); outside the node subnet and the pod and service networks.
+      nvke_pod_cidr:
+        type: str
+        default: 192.168.0.0/16
+        description: Pod network (NVKE default). It must not overlap the service network or the node network.
+      nvke_service_cidr:
+        type: str
+        default: 10.96.0.0/12
+        description: Service network.
+      nvke_system_reserved_memory:
+        type: str
+        default: 16Gi
+        description: Memory the kubelet keeps for the system (NVKE default, sized for servers). Lower it on small nodes or they never become Ready.
+      nvke_etcd_encryption:
+        type: bool
+        default: true
+        description: etcd encryption at rest. Can only be chosen at bootstrap.
+      nvke_trust_domain:
+        type: str
+        description: SPIFFE trust domain of the site. Default C(<cluster>.nvke.internal).
+      nvke_bootstrap_timeout:
+        type: str
+        default: 45m
+        description: How long nvkectl waits for the nodes to provision and join.
+      nvke_workdir:
+        type: path
+        default: /var/lib/nvke
+        description: 'Working directory on the bootstrap host: downloads, checkout, Go, and one directory per cluster.'
+      nvke_github_token:
+        type: str
+        default: ''
+        no_log: true
+        description: GitHub token for clusterctl's release lookups (60 anonymous requests an hour). Never logged.
+      nvke_credentials_dir:
+        type: path
+        description: Directory on the controller for the etcd encryption key, the SPIRE CA and the SPIRE entries. Default C(~/.nvke/<cluster>).
+      nvke_remove_key_from_bootstrap_host:
+        type: bool
+        default: true
+        description: Delete the etcd key file from the bootstrap host once it is on the controller.
+      nvke_kubeconfig_dest:
+        type: path
+        description: Admin kubeconfig written on the controller; empty to skip. Default C(~/.kube/<cluster>.yaml).
+      nvke_kubeconfig_merge:
+        type: bool
+        default: false
+        description: Also merge it into O(nvke_kubeconfig_merge_path), backup first.
+      nvke_kubeconfig_merge_path:
+        type: path
+        default: ~/.kube/config
+        description: Main kubeconfig to merge into.
+      nvke_kubeconfig_set_current:
+        type: bool
+        default: false
+        description: Make the cluster the current context when merging.

@@ -1,0 +1,131 @@
+---
+argument_specs:
+  main:
+    short_description: Create one UEFI VM on a libvirt/KVM host, optionally with a TPM 2.0.
+    description:
+      - Generates an ed25519 keypair on the controller and a cloud-init seed with the hostname and that key.
+      - The guest gets O(libvirt_vm_ip) from a DHCP reservation added to the libvirt network, or from a static cloud-init network config.
+      - Creates the domain with virt-install (q35, OVMF without Secure Boot, virtio, host-passthrough CPU,
+      - optional swtpm TPM 2.0) on a libvirt network or a host bridge.
+      - Idempotent. Runs as root on a Debian/Ubuntu KVM host and installs virt-install, qemu-img, genisoimage, OVMF and swtpm when missing.
+    author: Omer Sen
+    options:
+      libvirt_vm_name:
+        type: str
+        required: true
+        description: Domain name and guest hostname.
+      libvirt_vm_ip:
+        type: str
+        required: true
+        description: IPv4 address of the guest.
+      libvirt_vm_vcpus:
+        type: int
+        default: 4
+        description: Virtual CPUs.
+      libvirt_vm_memory_mb:
+        type: int
+        default: 8192
+        description: Memory in MiB.
+      libvirt_vm_disk_gb:
+        type: int
+        default: 40
+        description: Disk size in GiB, set at creation. The qcow2 is thin.
+      libvirt_vm_image_path:
+        type: path
+        default: ''
+        description: A qcow2 already on the KVM host to copy the disk from (e.g. the NVKE node image). Wins over O(libvirt_vm_image_url).
+      libvirt_vm_image_url:
+        type: str
+        default: https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
+        description: Cloud image to download once when O(libvirt_vm_image_path) is empty.
+      libvirt_vm_image_checksum:
+        type: str
+        default: sha256:04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+        description: Checksum of that image as C(algorithm:hex).
+      libvirt_vm_osinfo:
+        type: str
+        default: linux2022
+        description: virt-install C(--osinfo) value.
+      libvirt_vm_network:
+        type: str
+        default: default
+        description: libvirt network the VM is attached to.
+      libvirt_vm_bridge:
+        type: str
+        default: ''
+        description: Host bridge to attach to (e.g. C(br0)) instead of O(libvirt_vm_network).
+      libvirt_vm_addressing:
+        type: str
+        default: dhcp
+        choices:
+          - dhcp
+          - static
+        description:
+          - C(dhcp) adds a reservation for the VM's MAC to the libvirt network (on a bridge, reserve it in your DHCP server).
+          - The NVKE node image only does DHCP.
+          - C(static) writes a cloud-init network config with the address, O(libvirt_vm_prefix), gateway and DNS.
+      libvirt_vm_prefix:
+        type: int
+        default: 24
+        description: Prefix length of a static address.
+      libvirt_vm_gateway:
+        type: str
+        default: 192.168.122.1
+        description: Default gateway of a static address.
+      libvirt_vm_dns:
+        type: list
+        elements: str
+        default:
+          - 192.168.122.1
+        description: DNS servers of a static address.
+      libvirt_vm_ovmf_code:
+        type: path
+        default: /usr/share/OVMF/OVMF_CODE_4M.fd
+        description: UEFI firmware code (without Secure Boot).
+      libvirt_vm_ovmf_vars:
+        type: path
+        default: /usr/share/OVMF/OVMF_VARS_4M.fd
+        description: UEFI variable store template matching O(libvirt_vm_ovmf_code).
+      libvirt_vm_tpm:
+        type: bool
+        default: false
+        description: Give the guest a TPM 2.0 (swtpm emulator, TIS interface).
+      libvirt_vm_user:
+        type: str
+        default: ubuntu
+        description: Login user, with passwordless sudo and SSH key login only.
+      libvirt_vm_cloud_config:
+        type: dict
+        default: {}
+        description: More cloud-config for the first boot (e.g. C(write_files), C(runcmd)), merged over the hostname, user and SSH key the role sets.
+      libvirt_vm_autostart:
+        type: bool
+        default: true
+        description: Start the domain with the host.
+      libvirt_vm_disk_path:
+        type: path
+        default: /var/lib/libvirt/images
+        description: Directory for the disks, the seeds and a downloaded base image.
+      libvirt_vm_mac:
+        type: str
+        default: ''
+        description:
+          - MAC address of the NIC, lower case; the DHCP reservation is for it.
+          - Empty derives a stable C(<prefix>:xx:xx:xx) from the VM name, so a rebuilt VM keeps its MAC.
+      libvirt_vm_mac_prefix:
+        type: str
+        default: '52:54:00'
+        description:
+          - First three bytes of a derived MAC. QEMU's C(52:54:00) is a locally administered address.
+          - A guest that moves its NIC into an Open vSwitch bridge keeps the MAC only when it is globally administered (e.g. C(00:16:3e)).
+      libvirt_vm_ssh_key_dir:
+        type: path
+        default: ~/.ssh/nvke
+        description: Where the per-VM keypairs are kept, on the controller.
+      libvirt_vm_packages:
+        type: list
+        elements: str
+        description: KVM host packages the role installs when missing (Debian/Ubuntu names).
+      libvirt_vm_ssh_key_path:
+        type: path
+        description: Private key of this VM. Default C(<key dir>/<name>_ed25519).

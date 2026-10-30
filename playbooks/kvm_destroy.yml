@@ -1,0 +1,141 @@
+---
+# Destroys the NVKE VMs on the kvm_hosts (domain, UEFI vars, TPM state, disk,
+# cloud-init seed, DHCP reservation) and the exported kubeconfig, and sets
+# the cluster's credentials directory aside as <dir>.destroyed-<time>.
+# Irreversible: the cluster and everything in it is gone. The node image, the downloads and the SSH keys stay, so the next
+# run builds nothing; the BGP peer stays configured and simply has no
+# sessions.
+#
+#   ansible-playbook -i inventory/kvm omerfsen.nvke.kvm_destroy -e nvke_kvm_destroy_confirm=yes
+
+- name: Destroy the NVKE VMs
+  hosts: kvm_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Confirmation
+      ansible.builtin.assert:
+        that: nvke_kvm_destroy_confirm | default('') == 'yes'
+        fail_msg: This destroys the cluster's VMs. Rerun with -e nvke_kvm_destroy_confirm=yes.
+        quiet: true
+
+    # libvirt before 8.9 has no undefine --tpm, so the swtpm state directory
+    # (named after the domain UUID) is removed by hand.
+    - name: Stop and undefine the VMs on this hypervisor, with their TPM state
+      ansible.builtin.shell: |
+        set -o pipefail
+        virsh dominfo {{ item.name }} >/dev/null 2>&1 || exit 0
+        uuid=$(virsh domuuid {{ item.name }})
+        virsh destroy {{ item.name }} >/dev/null 2>&1 || true
+        virsh undefine {{ item.name }} --nvram >/dev/null
+        [ -n "$uuid" ] && rm -rf "/var/lib/libvirt/swtpm/$uuid"
+        echo removed
+      args: {executable: /bin/bash}
+      loop: "{{ nvke_kvm_vms | selectattr('kvm_host', 'eq', inventory_hostname) | list }}"
+      loop_control: {label: "{{ item.name }}"}
+      register: nvke_kvm_undefine
+      changed_when: "'removed' in nvke_kvm_undefine.stdout"
+
+    - name: Remove their disks and seeds
+      ansible.builtin.file:
+        path: "{{ nvke_kvm_disk_path }}/{{ item.0.name }}{{ item.1 }}"
+        state: absent
+      loop: "{{ nvke_kvm_vms | selectattr('kvm_host', 'eq', inventory_hostname) | product(['.qcow2', '-seed.iso']) | list }}"
+      loop_control: {label: "{{ item.0.name }}{{ item.1 }}"}
+
+    # The lease goes too: dnsmasq keeps a released VM's address for an hour
+    # and would not hand it to a rebuilt VM with another MAC.
+    - name: Remove their DHCP reservations and leases
+      ansible.builtin.shell: |
+        set -euo pipefail
+        net={{ nvke_kvm_network | quote }} ip={{ item.ip | quote }}
+        out=
+        entry=$(virsh net-dumpxml "$net" | grep -F "name='{{ item.name }}' ip='{{ item.ip }}'" || true)
+        if [ -n "$entry" ]; then
+          virsh net-update "$net" delete ip-dhcp-host "$(echo "$entry" | sed 's/^ *//')" --live --config >/dev/null
+          out=removed
+        fi
+        br=$(virsh net-info "$net" | awk '/^Bridge:/ {print $2}')
+        status=/var/lib/libvirt/dnsmasq/$br.status
+        if [ -s "$status" ]; then
+          holder=$(python3 -c 'import json, sys
+        for lease in json.load(open(sys.argv[1])):
+            if lease.get("ip-address") == sys.argv[2]:
+                print(lease.get("mac-address", ""))' "$status" "$ip")
+          if [ -n "$holder" ]; then dhcp_release "$br" "$ip" "$holder"; out=removed; fi
+        fi
+        echo $out
+      args: {executable: /bin/bash}
+      loop: "{{ nvke_kvm_vms | selectattr('kvm_host', 'eq', inventory_hostname) | list }}"
+      loop_control: {label: "{{ item.name }}"}
+      register: nvke_kvm_unreserve
+      changed_when: "'removed' in nvke_kvm_unreserve.stdout"
+      when: nvke_kvm_bridge | length == 0
+
+    - name: Forget the VMs' SSH host keys on the controller (rebuilt VMs get new ones)
+      ansible.builtin.command: ssh-keygen -R {{ item.ip }}
+      loop: "{{ nvke_kvm_vms }}"
+      loop_control: {label: "{{ item.ip }}"}
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: Remove the kubeconfig from the controller
+      ansible.builtin.file:
+        path: "{{ (nvke_kubeconfig_dest | default('~/.kube/' ~ nvke_cluster_name ~ '.yaml')) | expanduser }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    # Kept, renamed: it holds the only off-node copy of the etcd key.
+    - name: Set the cluster's credentials directory aside on the controller
+      ansible.builtin.shell: |
+        set -eu
+        dir={{ (nvke_credentials_dir | default('~/.nvke/' ~ nvke_cluster_name)) | expanduser | quote }}
+        [ -d "$dir" ] || exit 0
+        mv "$dir" "$dir.destroyed-$(date -u +%Y%m%dT%H%M%SZ)"
+        echo moved
+      args: {executable: /bin/bash}
+      register: nvke_kvm_credentials
+      changed_when: "'moved' in nvke_kvm_credentials.stdout"
+      delegate_to: localhost
+      become: false
+      run_once: true
+    - name: Read the main kubeconfig on the controller
+      ansible.builtin.slurp:
+        src: "{{ (nvke_kubeconfig_merge_path | default('~/.kube/config')) | expanduser }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: nvke_kvm_main_kubeconfig
+      failed_when: false
+      no_log: true
+
+    # Only the entries named after the cluster go; a backup is taken first.
+    - name: Remove the cluster from the main kubeconfig
+      ansible.builtin.copy:
+        dest: "{{ (nvke_kubeconfig_merge_path | default('~/.kube/config')) | expanduser }}"
+        content: >-
+          {%- set old = nvke_kvm_main_kubeconfig.content | b64decode | from_yaml -%}
+          {%- set name = nvke_cluster_name -%}
+          {%- set new = old | combine({
+                'clusters': old.clusters | default([], true) | rejectattr('name', 'eq', name) | list,
+                'users': old.users | default([], true) | rejectattr('name', 'eq', name) | list,
+                'contexts': old.contexts | default([], true) | rejectattr('name', 'eq', name) | list}) -%}
+          {%- if old['current-context'] | default('') == name -%}
+          {%-   set new = new | combine({'current-context': ''}) -%}
+          {%- endif -%}
+          {{ new | to_nice_yaml(indent=2) }}
+        mode: "0600"
+        backup: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+      no_log: true
+      when:
+        - nvke_kvm_main_kubeconfig.content is defined
+        - (nvke_kvm_main_kubeconfig.content | b64decode | from_yaml).contexts | default([], true)
+          | selectattr('name', 'eq', nvke_cluster_name) | list | length > 0

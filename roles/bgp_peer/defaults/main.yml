@@ -1,0 +1,18 @@
+---
+# A BGP speaker (FRR) on the router the NVKE nodes use as their default
+# gateway - on KVM, the hypervisor. kube-vip on every control-plane node
+# announces the API VIP as a /32 from AS 65100 to its gateway, which must
+# answer as AS 4294967000; both numbers are fixed in NVKE.
+
+# Node addresses allowed to peer (each control-plane node).
+bgp_peer_neighbors: []
+# The nodes' gateway: this host's address on their network, and the router ID.
+bgp_peer_address: 192.168.122.1
+bgp_peer_local_as: 4294967000
+bgp_peer_remote_as: 65100
+# Only /32 routes inside these prefixes are accepted (the VIP range). Nothing
+# is announced to the nodes.
+bgp_peer_vip_prefixes: []
+# Open TCP 179 from each neighbor to bgp_peer_address. auto: in ufw when it
+# is active, else in firewalld when it is running, else nothing.
+bgp_peer_firewall: auto

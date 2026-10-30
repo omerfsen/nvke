@@ -1,0 +1,10 @@
+---
+- name: Restart frr
+  ansible.builtin.systemd_service:
+    name: frr
+    state: restarted
+    daemon_reload: true
+
+- name: Apply the redirect settings
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/90-nvke-bgp-peer.conf
+  changed_when: true

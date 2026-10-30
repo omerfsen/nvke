@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: Create one UEFI VM on libvirt/KVM from a qcow2 or cloud image, with an optional TPM 2.0 and a DHCP reservation or static address.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags: [libvirt, kvm, vm, cloudinit, tpm]
+dependencies: []

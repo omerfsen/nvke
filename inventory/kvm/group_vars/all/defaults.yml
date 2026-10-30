@@ -1,0 +1,91 @@
+---
+# NVKE on KVM/libvirt: the node image, the VMs and the management cluster on
+# them. Override in group_vars/all/local.yml (gitignored) or with -e.
+
+# ── Network ──────────────────────────────────────────────────────────────
+# libvirt's "default" network; the VMs get their addresses from DHCP
+# reservations added to it (the NVKE node image only does DHCP):
+#   .<bootstrap_octet> bootstrap host, .<node_octet_base + N> node N
+# Bridged: set nvke_kvm_bridge to a host bridge, reserve the addresses in your
+# own DHCP server, and peer your router with the nodes over BGP yourself
+# (see docs/kvm.md).
+nvke_kvm_network: default
+nvke_kvm_bridge: ""
+nvke_kvm_subnet: 192.168.122
+nvke_kvm_gateway: 192.168.122.1
+nvke_kvm_bootstrap_octet: 100
+# Node N gets base + N, so the default nodes are .101, .102, .103.
+nvke_kvm_node_octet_base: 100
+
+# The API VIP is not on the node subnet: kube-vip announces it over BGP, and
+# the hypervisor (the nodes' gateway) installs it as an ECMP route.
+nvke_kvm_vip_prefix: 10.250.0.0/24
+nvke_vip: 10.250.0.10
+# Run the BGP peer on the first hypervisor. auto: when the VMs are on its NAT
+# network (no bridge), since it is then their gateway.
+nvke_kvm_bgp_peer: auto
+
+# Reach VMs behind a remote hypervisor's NAT network through that hypervisor
+# (SSH ProxyJump). auto: only for remote hypervisors without a bridge.
+nvke_kvm_proxy_jump: auto
+
+# ── VMs ──────────────────────────────────────────────────────────────────
+# Management cluster nodes: 1, 3 or 5 (each also a control plane, and the
+# count is fixed once bootstrapped). Each gets a TPM 2.0.
+nvke_kvm_node_count: 3
+nvke_kvm_node_size: {vcpus: 4, memory_mb: 8192, disk_gb: 40}
+# The bootstrap host (Ubuntu 24.04 cloud image): builds nvkectl and the seed
+# images, then runs the temporary seed cluster.
+nvke_kvm_bootstrap_size: {vcpus: 4, memory_mb: 8192, disk_gb: 40}
+nvke_kvm_name_prefix: nvke
+# Per-VM overrides of the sizes above, by VM name.
+nvke_kvm_vm_sizes: {}
+# Every VM has a predefined MAC, and its DHCP reservation is for that MAC:
+# <nvke_kvm_mac_prefix>:<nvke_kvm_mac_middle>:<last octet of its IP, in hex>,
+# so .101 is 00:16:3e:7a:00:65. Pin any VM's MAC here instead, by name:
+#   nvke_kvm_macs: {nvke-cp-01: "00:16:3e:10:00:01"}
+nvke_kvm_macs: {}
+nvke_kvm_mac_middle: "7a:00"
+# NVKE moves each node's NIC into an Open vSwitch bridge that takes over its
+# DHCP. OVS copies the NIC's MAC to the bridge only when the MAC is globally
+# administered; with QEMU's locally administered 52:54:00 the bridge asks for
+# DHCP with a random MAC and the node loses its reserved address. 00:16:3e has
+# the globally administered bit and is the prefix LXD uses for its instances.
+nvke_kvm_mac_prefix: "00:16:3e"
+nvke_kvm_ssh_key_dir: ~/.ssh/nvke
+# Disks, seeds and the node image, on each hypervisor.
+nvke_kvm_disk_path: /var/lib/libvirt/images
+
+# Built from the above. Every VM: name, ip, mac, group, kvm_host, vcpus,
+# memory_mb, disk_gb, tpm. The bootstrap host first, on the first
+# hypervisor; then the nodes, round robin over kvm_hosts.
+nvke_kvm_vms: >-
+  {%- set hosts = groups['kvm_hosts'] -%}
+  {%- set name = nvke_kvm_name_prefix ~ '-bootstrap' -%}
+  {%- set vms = [nvke_kvm_bootstrap_size | combine({
+        'name': name,
+        'mac': nvke_kvm_macs[name] | default(nvke_kvm_mac_prefix ~ ':' ~ nvke_kvm_mac_middle ~ ':' ~ '%02x' % (nvke_kvm_bootstrap_octet | int)),
+        'ip': nvke_kvm_subnet ~ '.' ~ nvke_kvm_bootstrap_octet,
+        'group': 'nvke_bootstrap', 'tpm': false,
+        'kvm_host': hosts[0]})
+      | combine(nvke_kvm_vm_sizes[name] | default({}))] -%}
+  {%- for i in range(1, nvke_kvm_node_count | int + 1) -%}
+  {%-   set name = nvke_kvm_name_prefix ~ '-cp-' ~ '%02d' % i -%}
+  {%-   set octet = nvke_kvm_node_octet_base | int + i -%}
+  {%-   set _ = vms.append(nvke_kvm_node_size | combine({
+          'name': name,
+          'ip': nvke_kvm_subnet ~ '.' ~ octet,
+          'mac': nvke_kvm_macs[name] | default(nvke_kvm_mac_prefix ~ ':' ~ nvke_kvm_mac_middle ~ ':' ~ '%02x' % octet),
+          'group': 'nvke_nodes', 'tpm': true,
+          'kvm_host': hosts[(i - 1) % hosts | length]})
+        | combine(nvke_kvm_vm_sizes[name] | default({}))) -%}
+  {%- endfor -%}
+  {{ vms }}
+
+# ── Cluster (role omerfsen.nvke.nvke) ────────────────────────────────────
+nvke_cluster_name: nvke-mgmt
+# The VMs are small next to NVKE's server-sized 16Gi default.
+nvke_system_reserved_memory: 1Gi
+# NVKE's default pod network, 192.168.0.0/16, contains the node network
+# (192.168.122.0/24); NVKE requires them not to overlap.
+nvke_pod_cidr: 10.244.0.0/16

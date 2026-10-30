@@ -1,0 +1,111 @@
+---
+# ── Release ──────────────────────────────────────────────────────────────
+# NVKE source nvkectl and the two bootstrap images are built from: a release
+# tag and the commit it must resolve to. Build nvkectl from the same release
+# as the node image and, later, the management plane.
+nvke_version: v0.22.0
+nvke_commit: 400c24fb6465b042be883d6b62472528520d6291
+nvke_repo: https://github.com/dsx-ai-factory/nvke.git
+
+# ── Management cluster (site spec) ───────────────────────────────────────
+# Lower-case RFC 1123 label; names the kubeconfig, the key file and the
+# credentials directory.
+nvke_cluster_name: nvke-mgmt
+# Without a leading v. The node image must carry it (the reference image
+# stages 1.34.2, 1.35.3, 1.36.3 and 1.37.2; NVKE supports 1.36.3).
+nvke_k8s_version: 1.36.3
+# OVN-Kubernetes version staged on the node image.
+nvke_cni_version: 2.4.2
+# Kubernetes API VIP, required with more than one node. kube-vip on every node
+# announces it as a /32 over BGP to the node's default gateway (local AS
+# 65100, peer AS 4294967000); it must be outside the node subnet and the pod
+# and service networks.
+nvke_vip: ""
+# NVKE's defaults. They must not overlap each other or the node network:
+# 192.168.0.0/16 contains libvirt's 192.168.122.0/24, so the KVM inventory
+# moves the pod network to 10.244.0.0/16.
+nvke_pod_cidr: 192.168.0.0/16
+nvke_service_cidr: 10.96.0.0/12
+# Memory the kubelet keeps for the system. NVKE's default is 16Gi, sized for
+# servers; a node with not much more than this never becomes Ready.
+nvke_system_reserved_memory: 16Gi
+# etcd encryption at rest; can only be chosen at bootstrap.
+nvke_etcd_encryption: true
+# SPIFFE trust domain shared by the nodes, the site spec and later installs.
+nvke_trust_domain: "{{ nvke_cluster_name }}.nvke.internal"
+# Wall-clock limit for the nodes to provision and join.
+nvke_bootstrap_timeout: 45m
+
+# ── SPIRE CA ─────────────────────────────────────────────────────────────
+# Your own CA for the site's SPIRE (PEM certificate and key, files on the
+# controller). Empty: a self-signed ECDSA P-256 CA is generated once on the
+# bootstrap host and copied to nvke_credentials_dir.
+nvke_spire_ca_cert_file: ""
+nvke_spire_ca_key_file: ""
+nvke_spire_ca_days: 3650
+
+# ── Hosts ────────────────────────────────────────────────────────────────
+# Address the nodes reach the bootstrap host at (SPIRE, TCP 30081).
+nvke_bootstrap_ip: "{{ hostvars[groups['nvke_bootstrap'][0]].nvke_node_ip
+  | default(hostvars[groups['nvke_bootstrap'][0]].ansible_host)
+  | default(groups['nvke_bootstrap'][0]) }}"
+# The management cluster's nodes: name, IP and TPM EK thumbprint (read by the
+# node entry point). Built from the nvke_nodes group.
+nvke_site_nodes: >-
+  {%- set nodes = [] -%}
+  {%- for h in groups['nvke_nodes'] | default([]) -%}
+  {%-   set _ = nodes.append({
+          'name': hostvars[h].nvke_node_name | default(h),
+          'ip': hostvars[h].nvke_node_ip | default(hostvars[h].ansible_host) | default(h),
+          'tpm': hostvars[h].nvke_tpm_ek_thumbprint | default('')}) -%}
+  {%- endfor -%}
+  {{ nodes }}
+# Open the bootstrap host's SPIRE port to the nodes. auto: in ufw when it is
+# active, else in firewalld when it is running, else nothing.
+nvke_firewall: auto
+
+# ── Bootstrap host toolchain (pins from NVKE's make/tool-versions.mk) ────
+nvke_workdir: /var/lib/nvke
+nvke_nerdctl_version: 2.3.5
+nvke_nerdctl_sha256:
+  amd64: b697295c623639734aaab737523c808fd3cc8d3046039fd94fff1744e4c317aa
+  arm64: 6e4b687f1d138e750a3c8372abc0f81d3d7490b6359c48c0562fc7dfe98859b2
+nvke_kind_version: v0.32.0
+nvke_kind_sha256:
+  amd64: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+  arm64: b92cd615e97585de8ddade28ed5cd7feb4248d717c233eea5b03c37298900f5d
+nvke_kubectl_version: v1.36.0
+nvke_kubectl_sha256:
+  amd64: 123d8c8844f46b1244c547fffb3c17180c0c26dac9890589fe7e67763298748e
+  arm64: 9f9d9c44a7b5264515ac9da5991584e2395bd50662e651132337e7b4d0c56f8f
+nvke_clusterctl_version: v1.13.6
+nvke_clusterctl_sha256:
+  amd64: 1e4019b8ef30fa13993716d28b9fec4072fee1e17ea2cc69cb7c8f232d9b8c2f
+  arm64: c3fe61fd44fa63d2efcee2a93432619527909b210a84cda7ee86eea1425de8c2
+nvke_helm_version: v4.2.4
+nvke_helm_sha256:
+  amd64: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+  arm64: 564de2191b881e9f71b5606b25345821ea1682f06ab90499d3ab22b530176da1
+nvke_go_version: 1.27.3
+nvke_go_sha256:
+  amd64: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+  arm64: a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+# Optional GitHub token for clusterctl's release lookups (60 anonymous
+# requests an hour). Never logged.
+nvke_github_token: ""
+
+# ── On the controller ────────────────────────────────────────────────────
+# The etcd encryption key, the SPIRE CA and the bootstrap's SPIRE entries are
+# copied here (mode 0700). Keep it safe: the key file is the only copy of the
+# etcd key that is not on a node.
+nvke_credentials_dir: "~/.nvke/{{ nvke_cluster_name }}"
+# Remove the etcd key file from the bootstrap host once it is copied.
+nvke_remove_key_from_bootstrap_host: true
+# Admin kubeconfig on the controller; empty to skip. Its cluster, user and
+# context are all named nvke_cluster_name.
+nvke_kubeconfig_dest: "~/.kube/{{ nvke_cluster_name }}.yaml"
+# Also merge it into nvke_kubeconfig_merge_path (backup first; same-name
+# entries replaced, all others kept).
+nvke_kubeconfig_merge: false
+nvke_kubeconfig_merge_path: ~/.kube/config
+nvke_kubeconfig_set_current: false

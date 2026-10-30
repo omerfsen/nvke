@@ -1,0 +1,132 @@
+---
+# FRR with only zebra and bgpd, peering with the listed nodes only, taking the
+# VIP /32s from the listed nodes and installing them as ECMP routes. Runs on
+# the gateway host as root. Leaves an FRR it did not configure alone.
+
+- name: Neighbors and VIP prefixes are set
+  ansible.builtin.assert:
+    that:
+      - bgp_peer_neighbors | length > 0
+      - bgp_peer_vip_prefixes | length > 0
+    fail_msg: Set bgp_peer_neighbors (the control-plane node IPs) and bgp_peer_vip_prefixes.
+    quiet: true
+
+- name: Read an existing FRR configuration
+  ansible.builtin.slurp:
+    src: /etc/frr/frr.conf
+  register: bgp_peer_existing
+  failed_when: false
+
+- name: An existing FRR configuration is ours
+  ansible.builtin.assert:
+    that: >-
+      bgp_peer_existing.content is not defined
+      or 'omerfsen.nvke.bgp_peer' in (bgp_peer_existing.content | b64decode)
+      or (bgp_peer_existing.content | b64decode | regex_findall('^router ', multiline=True) | length == 0)
+    fail_msg: >-
+      /etc/frr/frr.conf on this host already configures routing that this
+      collection did not write. Add the NVKE neighbors to it yourself (see
+      templates/frr.conf.j2) instead of letting this role replace it.
+    quiet: true
+
+- name: Interface that holds the gateway address
+  ansible.builtin.set_fact:
+    bgp_peer_interface: >-
+      {{ (ansible_facts.interfaces | map('regex_replace', '-', '_') | map('extract', ansible_facts)
+          | selectattr('ipv4', 'defined') | selectattr('ipv4.address', 'eq', bgp_peer_address)
+          | map(attribute='device') | first) | default('') }}
+
+- name: The gateway address is on this host
+  ansible.builtin.assert:
+    that: bgp_peer_interface | length > 0
+    fail_msg: "{{ bgp_peer_address }} is not an address of this host; bgp_peer runs on the nodes' gateway."
+    quiet: true
+
+- name: Install FRR
+  ansible.builtin.package:
+    name: frr
+    state: present
+
+# No -l: in FRR 8 "listen on" also means "never install routes in the
+# kernel". Unknown peers are refused anyway (explicit, passive neighbors),
+# and the firewall admits TCP 179 only from the nodes.
+- name: Run only zebra and bgpd
+  ansible.builtin.lineinfile:
+    path: /etc/frr/daemons
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+  loop:
+    - {key: zebra, value: "yes"}
+    - {key: bgpd, value: "yes"}
+    - {key: bgpd_options, value: '"   -A 127.0.0.1"'}
+  loop_control: {label: "{{ item.key }}"}
+  notify: Restart frr
+
+- name: No leftover boot drop-in from an earlier version of this role
+  ansible.builtin.file:
+    path: /etc/systemd/system/frr.service.d/10-nvke-wait-address.conf
+    state: absent
+  notify: Restart frr
+
+# The nodes and the VMs next to them share one subnet with this gateway, so
+# it would answer their VIP traffic with ICMP redirects to one node, pinning
+# them to it and losing the VIP when that node goes. No redirects: every
+# packet takes the ECMP route.
+- name: No ICMP redirects from the gateway
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-nvke-bgp-peer.conf
+    mode: "0644"
+    content: |
+      # Managed by omerfsen.nvke.bgp_peer.
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.default.send_redirects = 0
+      net.ipv4.conf.{{ bgp_peer_interface }}.send_redirects = 0
+  notify: Apply the redirect settings
+
+- name: FRR configuration
+  ansible.builtin.template:
+    src: frr.conf.j2
+    dest: /etc/frr/frr.conf
+    owner: frr
+    group: frr
+    mode: "0640"
+  notify: Restart frr
+
+- name: FRR runs and starts at boot
+  ansible.builtin.systemd_service:
+    name: frr
+    state: started
+    enabled: true
+
+- name: Firewall in use
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then echo ufw
+    elif systemctl is-active --quiet firewalld; then echo firewalld
+    else echo none; fi
+  args: {executable: /bin/bash}
+  register: bgp_peer_fw
+  changed_when: false
+  check_mode: false
+  when: bgp_peer_firewall == 'auto'
+
+- name: Allow BGP from each node (ufw)
+  ansible.builtin.command: >-
+    ufw allow proto tcp from {{ item }} to {{ bgp_peer_address }} port 179 comment 'nvke bgp'
+  loop: "{{ bgp_peer_neighbors }}"
+  register: bgp_peer_ufw
+  changed_when: "'Skipping' not in bgp_peer_ufw.stdout"
+  when: (bgp_peer_fw.stdout | default(bgp_peer_firewall)) == 'ufw'
+
+- name: Allow BGP from each node (firewalld)
+  ansible.builtin.shell: |
+    set -eu
+    rule='rule family="ipv4" source address="{{ item }}" destination address="{{ bgp_peer_address }}" port port="179" protocol="tcp" accept'
+    firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 && exit 0
+    firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null
+    firewall-cmd --add-rich-rule="$rule" >/dev/null
+    echo added
+  loop: "{{ bgp_peer_neighbors }}"
+  register: bgp_peer_firewalld
+  changed_when: "'added' in bgp_peer_firewalld.stdout"
+  when: (bgp_peer_fw.stdout | default(bgp_peer_firewall)) == 'firewalld'

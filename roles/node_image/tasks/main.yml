@@ -1,0 +1,180 @@
+---
+# Builds the NVKE reference node image (Ubuntu, nvke-agent, spire-agent, staged
+# Kubernetes and OVN packages) from a pinned NVKE checkout with the
+# repository's own Packer recipe, then copies it to node_image_dest_dir.
+# Skips everything when that image is already there.
+
+- name: Architecture of the build host
+  ansible.builtin.set_fact:
+    node_image_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('unsupported') }}"
+
+- name: The build host can bake the image
+  ansible.builtin.assert:
+    that:
+      - node_image_arch != 'unsupported'
+      - ansible_facts.os_family == 'Debian'
+      - node_image_variant in ['non-fde', 'fde']
+    fail_msg: >-
+      The image is built on a Debian or Ubuntu host with KVM, of the image's own
+      architecture (amd64 or arm64); node_image_variant is non-fde or fde.
+    quiet: true
+
+- name: Name of the finished image
+  ansible.builtin.set_fact:
+    node_image_name: "nvke-node-{{ node_image_variant }}-ubuntu-{{ node_image_ubuntu_release }}-{{ node_image_arch }}"
+    node_image_path: >-
+      {{ node_image_dest_dir }}/nvke-node-{{ node_image_variant }}-ubuntu-{{ node_image_ubuntu_release
+      }}-{{ node_image_arch }}-{{ node_image_nvke_version }}.qcow2
+
+- name: Is the image already built?
+  ansible.builtin.stat:
+    path: "{{ node_image_path }}"
+    get_checksum: false
+  register: node_image_stat
+
+- name: Build the image
+  when: not node_image_stat.stat.exists
+  block:
+    - name: KVM is available
+      ansible.builtin.stat:
+        path: /dev/kvm
+      register: node_image_kvm
+      failed_when: not node_image_kvm.stat.exists or not node_image_kvm.stat.ischr
+
+    - name: Installed packages
+      ansible.builtin.package_facts:
+
+    # The apt cache is refreshed only when something is missing: a broken
+    # third-party source on the host then cannot fail a run that installs
+    # nothing.
+    - name: Build packages
+      ansible.builtin.apt:
+        name: "{{ node_image_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: node_image_packages | reject('in', ansible_facts.packages) | list | length > 0
+
+    - name: Build directories
+      ansible.builtin.file:
+        path: "{{ node_image_build_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [tools, downloads, src, go, go-cache, tmp]
+
+    - name: Download Go and Packer (checksums verified)
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ node_image_build_dir }}/downloads/{{ item.url | basename }}"
+        checksum: "sha256:{{ item.sha256 }}"
+        mode: "0644"
+        timeout: 120
+      loop:
+        - url: https://go.dev/dl/go{{ node_image_go_version }}.linux-{{ node_image_arch }}.tar.gz
+          sha256: "{{ node_image_go_sha256[node_image_arch] }}"
+        - url: https://releases.hashicorp.com/packer/{{ node_image_packer_version }}/packer_{{ node_image_packer_version }}_linux_{{ node_image_arch }}.zip
+          sha256: "{{ node_image_packer_sha256[node_image_arch] }}"
+      loop_control: {label: "{{ item.url | basename }}"}
+
+    - name: Toolchain directories, one per version
+      ansible.builtin.file:
+        path: "{{ node_image_build_dir }}/tools/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - go-{{ node_image_go_version }}
+        - packer-{{ node_image_packer_version }}
+
+    - name: Unpack Go
+      ansible.builtin.unarchive:
+        src: "{{ node_image_build_dir }}/downloads/go{{ node_image_go_version }}.linux-{{ node_image_arch }}.tar.gz"
+        dest: "{{ node_image_build_dir }}/tools/go-{{ node_image_go_version }}"
+        remote_src: true
+        extra_opts: [--strip-components=1]
+        creates: "{{ node_image_build_dir }}/tools/go-{{ node_image_go_version }}/bin/go"
+
+    - name: Unpack Packer
+      ansible.builtin.unarchive:
+        src: "{{ node_image_build_dir }}/downloads/packer_{{ node_image_packer_version }}_linux_{{ node_image_arch }}.zip"
+        dest: "{{ node_image_build_dir }}/tools/packer-{{ node_image_packer_version }}"
+        remote_src: true
+        creates: "{{ node_image_build_dir }}/tools/packer-{{ node_image_packer_version }}/packer"
+
+    # The bake refuses a checkout with any change, so this one is the build's
+    # own and nothing else writes to it.
+    - name: Check out the pinned NVKE release
+      ansible.builtin.git:
+        repo: "{{ node_image_nvke_repo }}"
+        dest: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}"
+        version: "{{ node_image_nvke_version }}"
+        force: false
+      register: node_image_git
+
+    - name: The tag resolves to the pinned commit
+      ansible.builtin.assert:
+        that: node_image_git.after == node_image_nvke_commit
+        fail_msg: >-
+          {{ node_image_nvke_version }} resolves to {{ node_image_git.after }}, not
+          {{ node_image_nvke_commit }}. Check the tag before building from it.
+        quiet: true
+
+    - name: Remove the output of an earlier, unfinished build
+      ansible.builtin.command:
+        cmd: make -C os-image/packer clean-{{ node_image_variant }}-output
+        chdir: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}"
+        removes: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}/os-image/packer/output-{{ node_image_variant }}"
+
+    # 15-30 minutes with KVM, plus the first downloads. The log is kept in the
+    # build directory.
+    - name: Bake the image, logging to the build directory
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          make -C os-image image-native
+          ARCH={{ node_image_arch }} VARIANT={{ node_image_variant }}
+          UBUNTU_RELEASE={{ node_image_ubuntu_release }}
+          CPUS={{ node_image_build_cpus }} GUEST_MEMORY_MIB={{ node_image_build_memory_mib }}
+          2>&1 | tee {{ node_image_build_dir }}/build-{{ node_image_name }}.log
+        chdir: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}"
+        executable: /bin/bash
+      environment:
+        PATH: >-
+          {{ node_image_build_dir }}/tools/go-{{ node_image_go_version }}/bin:{{ node_image_build_dir
+          }}/tools/packer-{{ node_image_packer_version }}:{{ node_image_build_dir }}/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        GOTOOLCHAIN: local
+        GOPATH: "{{ node_image_build_dir }}/go"
+        GOCACHE: "{{ node_image_build_dir }}/go-cache"
+        TMPDIR: "{{ node_image_build_dir }}/tmp"
+        PACKER_PLUGIN_PATH: "{{ node_image_build_dir }}/tools/packer-plugins"
+      async: "{{ node_image_build_timeout }}"
+      poll: 30
+      changed_when: true
+
+    # The check NVKE's build page runs after the bake: boot a copy in QEMU and
+    # confirm cloud-init completes and the image contract holds.
+    - name: Smoke-test the image
+      ansible.builtin.command:
+        cmd: make -C os-image boot-smoke REQUIRE_ACCELERATION=1
+        chdir: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}"
+      environment:
+        PATH: >-
+          {{ node_image_build_dir }}/tools/go-{{ node_image_go_version }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        GOTOOLCHAIN: local
+        SSH_PORT: "{{ node_image_smoke_ssh_port | string }}"
+        TMPDIR: "{{ node_image_build_dir }}/tmp"
+      when: node_image_variant == 'non-fde'
+      changed_when: false
+
+    - name: Copy the image next to the VM disks
+      ansible.builtin.copy:
+        src: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}/os-image/packer/output-{{ node_image_variant }}/{{ node_image_name }}.qcow2"
+        dest: "{{ node_image_path }}"
+        remote_src: true
+        mode: "0644"
+
+    - name: Remove the Packer output
+      ansible.builtin.command:
+        cmd: make -C os-image/packer clean-{{ node_image_variant }}-output
+        chdir: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}"
+        removes: "{{ node_image_build_dir }}/src/nvke-{{ node_image_nvke_version }}/os-image/packer/output-{{ node_image_variant }}"
+      when: not node_image_keep_build_output

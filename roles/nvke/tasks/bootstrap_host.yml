@@ -1,0 +1,423 @@
+---
+# The bootstrap host: rootful nerdctl on its own containerd and buildkitd
+# (never Docker's), kind, kubectl, clusterctl, Helm and Go at NVKE's pins,
+# nvkectl and the two seed-cluster images built from the pinned release, and
+# the site's SPIRE CA. Runs as root on a Linux host the nodes can reach.
+
+- name: Architecture of the bootstrap host
+  ansible.builtin.set_fact:
+    nvke_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('unsupported') }}"
+    nvke_src: "{{ nvke_workdir }}/src/nvke-{{ nvke_version }}"
+    nvke_site_dir: "{{ nvke_workdir }}/{{ nvke_cluster_name }}"
+    nvke_controller_image: nke-controller:{{ nvke_version }}
+    nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
+
+- name: The bootstrap host is supported
+  ansible.builtin.assert:
+    that:
+      - nvke_arch != 'unsupported'
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.service_mgr == 'systemd'
+    fail_msg: The bootstrap host is an amd64 or arm64 Debian/Ubuntu host with systemd.
+    quiet: true
+
+- name: Installed packages
+  ansible.builtin.package_facts:
+
+- name: Packages for the build and the bootstrap
+  ansible.builtin.apt:
+    name: "{{ nvke_bootstrap_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: nvke_bootstrap_packages | reject('in', ansible_facts.packages) | list | length > 0
+  vars:
+    nvke_bootstrap_packages: [build-essential, ca-certificates, curl, git, iptables, jq, make, openssl]
+
+- name: Working directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ nvke_workdir }}", mode: "0755"}
+    - {path: "{{ nvke_workdir }}/downloads", mode: "0755"}
+    - {path: "{{ nvke_workdir }}/src", mode: "0755"}
+    - {path: "{{ nvke_workdir }}/go", mode: "0755"}
+    - {path: "{{ nvke_workdir }}/go-{{ nvke_go_version }}", mode: "0755"}
+    - {path: "{{ nvke_site_dir }}", mode: "0700"}
+  loop_control: {label: "{{ item.path }}"}
+
+# ── Downloads, checksum verified ─────────────────────────────────────────
+- name: Download nerdctl-full, Helm and Go
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ nvke_workdir }}/downloads/{{ item.url | basename }}"
+    checksum: "sha256:{{ item.sha256 }}"
+    mode: "0644"
+    timeout: 120
+  loop:
+    - url: >-
+        https://github.com/containerd/nerdctl/releases/download/v{{ nvke_nerdctl_version
+        }}/nerdctl-full-{{ nvke_nerdctl_version }}-linux-{{ nvke_arch }}.tar.gz
+      sha256: "{{ nvke_nerdctl_sha256[nvke_arch] }}"
+    - url: https://get.helm.sh/helm-{{ nvke_helm_version }}-linux-{{ nvke_arch }}.tar.gz
+      sha256: "{{ nvke_helm_sha256[nvke_arch] }}"
+    - url: https://go.dev/dl/go{{ nvke_go_version }}.linux-{{ nvke_arch }}.tar.gz
+      sha256: "{{ nvke_go_sha256[nvke_arch] }}"
+  loop_control: {label: "{{ item.url | basename }}"}
+
+- name: Install kind, kubectl and clusterctl
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: /usr/local/bin/{{ item.name }}
+    checksum: "sha256:{{ item.sha256 }}"
+    mode: "0755"
+    timeout: 120
+  loop:
+    - name: kind
+      url: https://github.com/kubernetes-sigs/kind/releases/download/{{ nvke_kind_version }}/kind-linux-{{ nvke_arch }}
+      sha256: "{{ nvke_kind_sha256[nvke_arch] }}"
+    - name: kubectl
+      url: https://dl.k8s.io/release/{{ nvke_kubectl_version }}/bin/linux/{{ nvke_arch }}/kubectl
+      sha256: "{{ nvke_kubectl_sha256[nvke_arch] }}"
+    - name: clusterctl
+      url: https://github.com/kubernetes-sigs/cluster-api/releases/download/{{ nvke_clusterctl_version }}/clusterctl-linux-{{ nvke_arch }}
+      sha256: "{{ nvke_clusterctl_sha256[nvke_arch] }}"
+  loop_control: {label: "{{ item.name }}"}
+
+- name: Versions installed by this role
+  ansible.builtin.slurp:
+    src: "{{ nvke_workdir }}/installed.json"
+  register: nvke_installed_raw
+  failed_when: false
+
+- name: Read them
+  ansible.builtin.set_fact:
+    nvke_installed: "{{ (nvke_installed_raw.content | b64decode | from_json) if nvke_installed_raw.content is defined else {} }}"
+
+- name: Unpack nerdctl-full (containerd, buildkitd, CNI plugins) into /usr/local
+  ansible.builtin.unarchive:
+    src: "{{ nvke_workdir }}/downloads/nerdctl-full-{{ nvke_nerdctl_version }}-linux-{{ nvke_arch }}.tar.gz"
+    dest: /usr/local
+    remote_src: true
+  when: nvke_installed.nerdctl | default('') != nvke_nerdctl_version
+  notify: Restart the nerdctl runtime
+
+- name: Unpack Helm
+  ansible.builtin.unarchive:
+    src: "{{ nvke_workdir }}/downloads/helm-{{ nvke_helm_version }}-linux-{{ nvke_arch }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: [--strip-components=1, "linux-{{ nvke_arch }}/helm"]
+  when: nvke_installed.helm | default('') != nvke_helm_version
+
+- name: Unpack Go
+  ansible.builtin.unarchive:
+    src: "{{ nvke_workdir }}/downloads/go{{ nvke_go_version }}.linux-{{ nvke_arch }}.tar.gz"
+    dest: "{{ nvke_workdir }}/go-{{ nvke_go_version }}"
+    remote_src: true
+    extra_opts: [--strip-components=1]
+    creates: "{{ nvke_workdir }}/go-{{ nvke_go_version }}/bin/go"
+
+- name: Record the installed versions
+  ansible.builtin.copy:
+    dest: "{{ nvke_workdir }}/installed.json"
+    content: "{{ {'nerdctl': nvke_nerdctl_version, 'helm': nvke_helm_version} | to_nice_json }}\n"
+    mode: "0644"
+
+# ── Standalone containerd and buildkitd for nerdctl ──────────────────────
+# Their own units, config, socket and data root, next to (never instead of)
+# any Docker or Kubernetes containerd on the host. nerdctl.toml names the
+# socket, so plain `nerdctl` and kind's nerdctl provider find it, and keeps
+# nerdctl's network configs out of /etc/cni/net.d.
+# containerd keeps its root at 0711 itself.
+- name: Runtime directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/containerd-nerdctl, mode: "0755"}
+    - {path: /etc/containerd-nerdctl/net.d, mode: "0755"}
+    - {path: /etc/nerdctl, mode: "0755"}
+    - {path: /var/lib/containerd-nerdctl, mode: "0711"}
+    - {path: /var/lib/containerd-nerdctl/nerdctl, mode: "0755"}
+  loop_control: {label: "{{ item.path }}"}
+
+- name: Is the containerd config there?
+  ansible.builtin.stat:
+    path: /etc/containerd-nerdctl/config.toml
+  register: nvke_containerd_conf
+
+- name: Write the containerd config (defaults, own root, state and socket)
+  ansible.builtin.shell: |
+    set -o pipefail
+    /usr/local/bin/containerd config default \
+      | sed -e 's#^root = .*#root = "/var/lib/containerd-nerdctl"#' \
+            -e 's#^state = .*#state = "/run/containerd-nerdctl"#' \
+            -e 's#/run/containerd/containerd.sock#/run/containerd-nerdctl/containerd.sock#' \
+      > /etc/containerd-nerdctl/config.toml
+    chmod 0644 /etc/containerd-nerdctl/config.toml
+  args: {executable: /bin/bash}
+  when: not nvke_containerd_conf.stat.exists
+  changed_when: true
+  notify: Restart the nerdctl runtime
+
+- name: Configure nerdctl
+  ansible.builtin.copy:
+    dest: /etc/nerdctl/nerdctl.toml
+    mode: "0644"
+    content: |
+      # Managed by omerfsen.nvke.
+      address = "unix:///run/containerd-nerdctl/containerd.sock"
+      namespace = "default"
+      data_root = "/var/lib/containerd-nerdctl/nerdctl"
+      cni_netconfpath = "/etc/containerd-nerdctl/net.d"
+
+- name: Units for the standalone containerd and buildkitd
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/{{ item.name }}
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - name: containerd-nerdctl.service
+      content: |
+        # Managed by omerfsen.nvke.
+        [Unit]
+        Description=Standalone containerd for nerdctl and the NVKE seed cluster
+        After=network.target
+
+        [Service]
+        ExecStart=/usr/local/bin/containerd --config /etc/containerd-nerdctl/config.toml
+        Restart=on-failure
+        Delegate=yes
+        KillMode=process
+        OOMScoreAdjust=-999
+        LimitNOFILE=infinity
+        LimitNPROC=infinity
+        LimitCORE=infinity
+        TasksMax=infinity
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: buildkit-nerdctl.service
+      content: |
+        # Managed by omerfsen.nvke.
+        [Unit]
+        Description=buildkitd for nerdctl build, on the standalone containerd
+        After=containerd-nerdctl.service
+        Requires=containerd-nerdctl.service
+
+        [Service]
+        ExecStart=/usr/local/bin/buildkitd \
+          --addr unix:///run/buildkit-nerdctl/buildkitd.sock \
+          --oci-worker=false \
+          --containerd-worker=true \
+          --containerd-worker-addr /run/containerd-nerdctl/containerd.sock \
+          --containerd-worker-namespace default
+        Restart=on-failure
+        KillMode=process
+
+        [Install]
+        WantedBy=multi-user.target
+  loop_control: {label: "{{ item.name }}"}
+  notify: Restart the nerdctl runtime
+
+- name: Apply runtime changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the standalone containerd and buildkitd
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: [containerd-nerdctl, buildkit-nerdctl]
+
+- name: Wait for their sockets
+  ansible.builtin.wait_for:
+    path: "{{ item }}"
+    timeout: 60
+  loop:
+    - /run/containerd-nerdctl/containerd.sock
+    - /run/buildkit-nerdctl/buildkitd.sock
+
+# ── nvkectl and the seed-cluster images, from the pinned release ─────────
+- name: Check out the pinned NVKE release
+  ansible.builtin.git:
+    repo: "{{ nvke_repo }}"
+    dest: "{{ nvke_src }}"
+    version: "{{ nvke_version }}"
+    force: false
+  register: nvke_git
+
+- name: The tag resolves to the pinned commit
+  ansible.builtin.assert:
+    that: nvke_git.after == nvke_commit
+    fail_msg: "{{ nvke_version }} resolves to {{ nvke_git.after }}, not {{ nvke_commit }}. Check the tag before building from it."
+    quiet: true
+
+- name: Build nvkectl
+  ansible.builtin.command:
+    cmd: make -C cli build
+    chdir: "{{ nvke_src }}"
+    creates: "{{ nvke_src }}/cli/bin/nvkectl"
+  environment: "{{ nvke_build_env }}"
+
+- name: Put nvkectl on PATH
+  ansible.builtin.file:
+    src: "{{ nvke_src }}/cli/bin/nvkectl"
+    dest: /usr/local/bin/nvkectl
+    state: link
+    force: true
+
+- name: Which seed-cluster images are built?
+  ansible.builtin.command: nerdctl image inspect {{ nvke_controller_image }} {{ nvke_provisioned_image }}
+  register: nvke_images_present
+  failed_when: false
+  changed_when: false
+  check_mode: false
+  environment: "{{ nvke_build_env }}"
+
+- name: Build the controller and provisioned-provider images (several minutes)
+  ansible.builtin.command:
+    cmd: >-
+      make -C cli images
+      CONTROLLER_IMAGE={{ nvke_controller_image }}
+      CAPI_PROVISIONED_IMAGE={{ nvke_provisioned_image }}
+    chdir: "{{ nvke_src }}"
+  environment: "{{ nvke_build_env }}"
+  when: nvke_images_present.rc != 0
+  changed_when: true
+
+# ── SPIRE CA ─────────────────────────────────────────────────────────────
+- name: Copy your SPIRE CA
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ nvke_site_dir }}/{{ item.dest }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {src: "{{ nvke_spire_ca_cert_file }}", dest: spire-ca.crt, mode: "0644"}
+    - {src: "{{ nvke_spire_ca_key_file }}", dest: spire-ca.key, mode: "0600"}
+  loop_control: {label: "{{ item.dest }}"}
+  no_log: true
+  when: nvke_spire_ca_cert_file | length > 0
+
+- name: Generate a self-signed SPIRE CA (ECDSA P-256)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    openssl ecparam -name prime256v1 -genkey -noout -out spire-ca.key
+    openssl req -x509 -new -key spire-ca.key -sha256 -days {{ nvke_spire_ca_days | int }} \
+      -subj "/O=NVKE/CN={{ nvke_cluster_name }} SPIRE CA" \
+      -addext "basicConstraints=critical,CA:TRUE" \
+      -addext "keyUsage=critical,keyCertSign,cRLSign" \
+      -out spire-ca.crt
+    chmod 0644 spire-ca.crt
+  args:
+    chdir: "{{ nvke_site_dir }}"
+    executable: /bin/bash
+    creates: "{{ nvke_site_dir }}/spire-ca.key"
+  when: nvke_spire_ca_cert_file | length == 0
+
+- name: Read the SPIRE CA certificate (the nodes' trust bundle)
+  ansible.builtin.slurp:
+    src: "{{ nvke_site_dir }}/spire-ca.crt"
+  register: nvke_spire_ca_slurp
+
+- name: Keep the CA certificate for the nodes
+  ansible.builtin.set_fact:
+    nvke_spire_ca_cert_pem: "{{ nvke_spire_ca_slurp.content | b64decode }}"
+
+# The first-boot user data of NVKE's "Prepare nodes" page: SPIRE pointed at
+# this host with the site's trust domain and CA, then the Kubernetes package
+# before the OVN-Kubernetes ones (the images package loads into the
+# containerd the Kubernetes package provides). Provision the nodes with it.
+- name: Node user data (cloud-config)
+  ansible.builtin.set_fact:
+    nvke_node_cloud_config:
+      write_files:
+        - path: /etc/nke/spire.env
+          permissions: "0600"
+          content: |
+            SPIRE_SERVER_ADDRESS={{ nvke_bootstrap_ip }}
+            SPIRE_SERVER_PORT=30081
+            SPIRE_TRUST_DOMAIN={{ nvke_trust_domain }}
+        - path: /etc/nke/trust-bundle.pem
+          permissions: "0644"
+          content: "{{ nvke_spire_ca_cert_pem | trim }}\n"
+      runcmd:
+        - DEBIAN_FRONTEND=noninteractive apt-get install -y nvke-kubeadm-distro-{{ nvke_k8s_version }}
+        - >-
+          DEBIAN_FRONTEND=noninteractive apt-get install -y
+          nvke-cni-ovn-images-{{ nvke_cni_version }} nvke-cni-ovn-charts-{{ nvke_cni_version }}
+
+- name: Credentials directory on the controller
+  ansible.builtin.file:
+    path: "{{ nvke_credentials_dir | expanduser }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Save the node user data on the controller
+  ansible.builtin.copy:
+    dest: "{{ nvke_credentials_dir | expanduser }}/node-user-data.yaml"
+    content: "#cloud-config\n{{ nvke_node_cloud_config | to_nice_yaml(indent=2, width=1000) }}"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: Copy the generated CA to the controller
+  ansible.builtin.fetch:
+    src: "{{ nvke_site_dir }}/{{ item }}"
+    dest: "{{ nvke_credentials_dir | expanduser }}/{{ item }}"
+    flat: true
+  loop: [spire-ca.crt, spire-ca.key]
+  when: nvke_spire_ca_cert_file | length == 0
+
+# fetch does not keep modes.
+- name: CA key permissions on the controller
+  ansible.builtin.file:
+    path: "{{ nvke_credentials_dir | expanduser }}/spire-ca.key"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  when: nvke_spire_ca_cert_file | length == 0
+
+# ── Firewall: SPIRE for the nodes' attestation ───────────────────────────
+- name: Firewall in use
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then echo ufw
+    elif systemctl is-active --quiet firewalld; then echo firewalld
+    else echo none; fi
+  args: {executable: /bin/bash}
+  register: nvke_fw
+  changed_when: false
+  check_mode: false
+  when: nvke_firewall == 'auto'
+
+- name: Allow SPIRE (TCP 30081) from each node (ufw)
+  ansible.builtin.command: >-
+    ufw allow proto tcp from {{ item.ip }} to any port 30081 comment 'nvke spire'
+  loop: "{{ nvke_site_nodes }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: nvke_ufw
+  changed_when: "'Skipping' not in nvke_ufw.stdout"
+  when: (nvke_fw.stdout | default(nvke_firewall)) == 'ufw'
+
+- name: Allow SPIRE (TCP 30081) from each node (firewalld)
+  ansible.builtin.shell: |
+    set -eu
+    rule='rule family="ipv4" source address="{{ item.ip }}" port port="30081" protocol="tcp" accept'
+    firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 && exit 0
+    firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null
+    firewall-cmd --add-rich-rule="$rule" >/dev/null
+    echo added
+  loop: "{{ nvke_site_nodes }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: nvke_firewalld
+  changed_when: "'added' in nvke_firewalld.stdout"
+  when: (nvke_fw.stdout | default(nvke_firewall)) == 'firewalld'

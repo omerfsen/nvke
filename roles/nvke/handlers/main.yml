@@ -1,0 +1,23 @@
+---
+- name: Restart the nerdctl runtime
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: [containerd-nerdctl, buildkit-nerdctl]
+
+- name: Render the SPIRE agent config and restart the agents
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: [nvke-spire-configure, spire-agent]
+  notify: Restart the node agent
+
+# Not waited for: nvke-agent starts only once SPIRE has attested the node,
+# which needs the bootstrap's SPIRE server; until then it restarts on its own.
+- name: Restart the node agent
+  ansible.builtin.systemd_service:
+    name: nvke-agent
+    state: restarted
+    no_block: true

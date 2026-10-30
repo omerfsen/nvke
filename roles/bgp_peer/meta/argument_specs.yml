@@ -1,0 +1,44 @@
+---
+argument_specs:
+  main:
+    short_description: FRR BGP peer that installs the NVKE API VIP announced by kube-vip.
+    description:
+      - kube-vip on every NVKE control-plane node announces the API VIP as a /32 from AS 65100 to the node's default gateway,
+      - which must peer as AS 4294967000.
+      - This role makes the gateway host (on KVM, the hypervisor) that peer.
+      - Installs FRR with only zebra and bgpd, passive sessions to the listed nodes only,
+      - accepts nothing but /32s inside O(bgp_peer_vip_prefixes), announces nothing, and installs ECMP routes.
+      - Opens TCP 179 from each node in ufw or firewalld. Refuses to replace an FRR configuration it did not write.
+    author: Omer Sen
+    options:
+      bgp_peer_neighbors:
+        type: list
+        elements: str
+        required: true
+        description: Control-plane node addresses allowed to peer.
+      bgp_peer_vip_prefixes:
+        type: list
+        elements: str
+        required: true
+        description: Prefixes the VIPs are in (e.g. C(10.250.0.0/24)); only /32s inside them are accepted.
+      bgp_peer_address:
+        type: str
+        default: 192.168.122.1
+        description: The nodes' default gateway, an address of this host; used as router ID and to find the interface.
+      bgp_peer_local_as:
+        type: int
+        default: 4294967000
+        description: AS of this peer. NVKE fixes it at 4294967000.
+      bgp_peer_remote_as:
+        type: int
+        default: 65100
+        description: AS of the nodes. NVKE fixes it at 65100.
+      bgp_peer_firewall:
+        type: str
+        default: auto
+        choices:
+          - auto
+          - ufw
+          - firewalld
+          - none
+        description: Where to open TCP 179 from the nodes. C(auto) picks an active ufw, else a running firewalld.

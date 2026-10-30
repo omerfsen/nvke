@@ -1,0 +1,37 @@
+! {{ ansible_managed }} (omerfsen.nvke.bgp_peer)
+! API VIP routes from the NVKE control-plane nodes' kube-vip.
+frr defaults traditional
+hostname {{ ansible_facts.hostname }}
+log syslog informational
+service integrated-vtysh-config
+!
+{% for prefix in bgp_peer_vip_prefixes %}
+ip prefix-list NVKE-VIPS seq {{ loop.index * 10 }} permit {{ prefix }} ge 32 le 32
+{% endfor %}
+!
+route-map NVKE-VIPS-IN permit 10
+ match ip address prefix-list NVKE-VIPS
+exit
+!
+route-map NVKE-NONE deny 10
+exit
+!
+router bgp {{ bgp_peer_local_as }}
+ bgp router-id {{ bgp_peer_address }}
+ no bgp default ipv4-unicast
+ no bgp ebgp-requires-policy
+ neighbor NVKE peer-group
+ neighbor NVKE remote-as {{ bgp_peer_remote_as }}
+ neighbor NVKE passive
+{% for neighbor in bgp_peer_neighbors %}
+ neighbor {{ neighbor }} peer-group NVKE
+{% endfor %}
+ !
+ address-family ipv4 unicast
+  maximum-paths {{ [bgp_peer_neighbors | length, 1] | max }}
+  neighbor NVKE activate
+  neighbor NVKE route-map NVKE-VIPS-IN in
+  neighbor NVKE route-map NVKE-NONE out
+ exit-address-family
+exit
+!

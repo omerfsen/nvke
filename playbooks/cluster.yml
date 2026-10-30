@@ -1,0 +1,48 @@
+---
+# An NVKE management cluster on hosts you already have: nvke_bootstrap is the
+# bootstrap host (one), nvke_nodes the nodes (1, 3 or 5), built from the NVKE
+# node image. With more than one node, nvke_vip must be routed to the nodes by
+# a BGP peer on their gateway (omerfsen.nvke.bgp_peer, or your router).
+#
+#   ansible-playbook -i inventory.yml omerfsen.nvke.cluster
+#
+# Tags bootstrap_host, node and site run one step, e.g. --tags bootstrap_host
+# to get the nodes' user data before provisioning them.
+
+- name: Prepare the bootstrap host
+  hosts: nvke_bootstrap[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Runtime, tools, nvkectl, images and SPIRE CA
+      tags: [bootstrap_host]
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.nvke
+        tasks_from: bootstrap_host
+        apply: {tags: [bootstrap_host]}
+
+- name: Prepare the nodes
+  hosts: nvke_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: SPIRE, Kubernetes and OVN packages, TPM thumbprint
+      tags: [node]
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.nvke
+        tasks_from: node
+        apply: {tags: [node]}
+      vars:
+        nvke_spire_trust_bundle: "{{ hostvars[groups['nvke_bootstrap'][0]].nvke_spire_ca_cert_pem }}"
+
+- name: Bootstrap the management cluster
+  hosts: nvke_bootstrap[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run nvkectl bootstrap site, then export the kubeconfig and keys
+      tags: [site]
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.nvke
+        tasks_from: site
+        apply: {tags: [site]}

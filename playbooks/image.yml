@@ -1,0 +1,45 @@
+---
+# Builds the NVKE reference node image on the first kvm_hosts host and copies
+# it to the others. kvm.yml runs this itself; run it alone to build ahead.
+#
+#   ansible-playbook -i inventory/kvm omerfsen.nvke.image
+
+- name: Build the node image
+  hosts: kvm_hosts[0]
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Build it
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.node_image
+      vars:
+        node_image_dest_dir: "{{ nvke_kvm_disk_path | default('/var/lib/libvirt/images') }}"
+
+- name: Copy the node image to the other hypervisors
+  hosts: kvm_hosts[1:]
+  become: true
+  gather_facts: false
+  tasks:
+    # Through the controller, which reaches every hypervisor.
+    - name: Is the image already here?
+      ansible.builtin.stat:
+        path: "{{ hostvars[groups['kvm_hosts'][0]].node_image_path }}"
+        get_checksum: false
+      register: nvke_image_here
+
+    - name: Copy it from the first hypervisor
+      when: not nvke_image_here.stat.exists
+      block:
+        - name: Fetch it to the controller once
+          ansible.builtin.fetch:
+            src: "{{ hostvars[groups['kvm_hosts'][0]].node_image_path }}"
+            dest: "{{ lookup('env', 'TMPDIR') | default('/tmp', true) }}/nvke-image/"
+            flat: true
+          delegate_to: "{{ groups['kvm_hosts'][0] }}"
+          run_once: true
+
+        - name: Copy it here
+          ansible.builtin.copy:
+            src: "{{ lookup('env', 'TMPDIR') | default('/tmp', true) }}/nvke-image/{{ hostvars[groups['kvm_hosts'][0]].node_image_path | basename }}"
+            dest: "{{ hostvars[groups['kvm_hosts'][0]].node_image_path }}"
+            mode: "0644"

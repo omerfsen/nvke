@@ -1,0 +1,81 @@
+---
+argument_specs:
+  main:
+    short_description: Build the NVKE reference node image from a pinned NVKE release.
+    description:
+      - Installs the build packages, Go and Packer (checksum verified) and checks out NVKE at O(node_image_nvke_version),
+      - refusing a tag that does not resolve to O(node_image_nvke_commit).
+      - Runs the repository's own C(make -C os-image image-native) bake with KVM and C(boot-smoke) check, as NVKE's build page does.
+      - Copies the qcow2 to O(node_image_dest_dir).
+      - Does nothing when that image already exists. Runs as root on a Debian/Ubuntu KVM host of the image's architecture.
+    author: Omer Sen
+    options:
+      node_image_nvke_version:
+        type: str
+        default: v0.22.0
+        description: NVKE release tag to build from.
+      node_image_nvke_commit:
+        type: str
+        default: 400c24fb6465b042be883d6b62472528520d6291
+        description: Commit the tag must resolve to.
+      node_image_nvke_repo:
+        type: str
+        default: https://github.com/dsx-ai-factory/nvke.git
+        description: NVKE Git repository.
+      node_image_variant:
+        type: str
+        default: non-fde
+        choices:
+          - non-fde
+          - fde
+        description: Image variant. FDE images share one disk key across all nodes and are for evaluation only.
+      node_image_ubuntu_release:
+        type: str
+        default: 26.04.1
+        description: Ubuntu point release to install (C(26.04.1) or C(24.04.5)).
+      node_image_build_dir:
+        type: path
+        default: /var/lib/nvke-build
+        description: Checkout, toolchain, ISO and Go caches; about 40 GiB at peak.
+      node_image_dest_dir:
+        type: path
+        default: /var/lib/libvirt/images
+        description: Directory the finished image is copied to.
+      node_image_keep_build_output:
+        type: bool
+        default: false
+        description: Keep Packer's copy of the image after the copy.
+      node_image_smoke_ssh_port:
+        type: int
+        default: 2222
+        description: Local TCP port the smoke test (C(make -C os-image boot-smoke)) forwards to the test VM's SSH.
+      node_image_build_cpus:
+        type: int
+        default: 4
+        description: vCPUs of the build VM.
+      node_image_build_memory_mib:
+        type: int
+        default: 8192
+        description: Memory of the build VM in MiB.
+      node_image_build_timeout:
+        type: int
+        default: 7200
+        description: Seconds one build may take.
+      node_image_go_version:
+        type: str
+        default: 1.27.3
+        description: Go version, matching the repository's C(go.work).
+      node_image_go_sha256:
+        type: dict
+        description: SHA-256 of the Go archive per architecture (C(amd64), C(arm64)).
+      node_image_packer_version:
+        type: str
+        default: 1.15.4
+        description: Packer version the recipe requires.
+      node_image_packer_sha256:
+        type: dict
+        description: SHA-256 of the Packer archive per architecture.
+      node_image_packages:
+        type: list
+        elements: str
+        description: Build host packages. The apt cache is refreshed only when one is missing.

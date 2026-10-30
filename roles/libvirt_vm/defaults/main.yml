@@ -1,0 +1,58 @@
+---
+# One VM per call: include the role with libvirt_vm_name, libvirt_vm_ip and
+# sizes set. Runs on the KVM host as root.
+
+# Required per VM. Sizes apply when the VM is created.
+libvirt_vm_name: ""
+libvirt_vm_ip: ""
+libvirt_vm_vcpus: 4
+libvirt_vm_memory_mb: 8192
+libvirt_vm_disk_gb: 40
+
+# Base image: a qcow2 already on the KVM host (libvirt_vm_image_path, e.g. the
+# NVKE node image), or a cloud image downloaded once and checksum verified.
+# Default: Ubuntu 24.04 LTS server cloud image, release 20261017
+# (https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS).
+libvirt_vm_image_path: ""
+libvirt_vm_image_url: https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
+libvirt_vm_image_checksum: sha256:04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+# virt-install --osinfo value; the host's osinfo database may not know the
+# newest Ubuntu, and a generic 2022 Linux gives the same virtio devices.
+libvirt_vm_osinfo: linux2022
+
+# Network: a libvirt network, or a host bridge (bridge wins when set).
+libvirt_vm_network: default
+libvirt_vm_bridge: ""
+# How the guest gets libvirt_vm_ip:
+#   dhcp:   a DHCP reservation for the VM's MAC in the libvirt network (added
+#           here); on a bridge, reserve it in your own DHCP server. The NVKE
+#           node image only does DHCP.
+#   static: a cloud-init network-config with the address below.
+libvirt_vm_addressing: dhcp
+libvirt_vm_prefix: 24
+libvirt_vm_gateway: 192.168.122.1
+libvirt_vm_dns: [192.168.122.1]
+
+# UEFI firmware (non-Secure-Boot OVMF, the pair the NVKE image is tested with).
+libvirt_vm_ovmf_code: /usr/share/OVMF/OVMF_CODE_4M.fd
+libvirt_vm_ovmf_vars: /usr/share/OVMF/OVMF_VARS_4M.fd
+# A TPM 2.0 (swtpm, TIS interface): NVKE nodes attest with it.
+libvirt_vm_tpm: false
+
+libvirt_vm_user: ubuntu
+# More cloud-config for the guest's first boot (write_files, runcmd, ...),
+# merged over the hostname, user and key this role sets.
+libvirt_vm_cloud_config: {}
+libvirt_vm_autostart: true
+libvirt_vm_disk_path: /var/lib/libvirt/images
+# The NIC's MAC. Empty: libvirt_vm_mac_prefix plus three bytes derived from
+# the VM name, so the same VM always gets the same MAC (and keeps its DHCP
+# reservation).
+libvirt_vm_mac: ""
+libvirt_vm_mac_prefix: "52:54:00"
+# One ed25519 keypair per VM, generated on the controller.
+libvirt_vm_ssh_key_dir: "~/.ssh/nvke"
+libvirt_vm_ssh_key_path: "{{ libvirt_vm_ssh_key_dir | expanduser }}/{{ libvirt_vm_name }}_ed25519"
+
+# KVM host packages (Debian/Ubuntu names) the role uses.
+libvirt_vm_packages: [dnsmasq-utils, genisoimage, libvirt-clients, ovmf, qemu-utils, swtpm, swtpm-tools, virtinst]

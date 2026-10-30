@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: Build the NVKE reference node OS image (Ubuntu with nvke-agent and spire-agent) from a pinned NVKE release.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags: [nvke, kubernetes, nvidia, packer]
+dependencies: []

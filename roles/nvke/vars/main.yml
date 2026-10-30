@@ -1,0 +1,12 @@
+---
+# Environment for builds and nvkectl on the bootstrap host: the pinned Go,
+# the tools in /usr/local/bin, and the standalone containerd and buildkitd.
+nvke_build_env:
+  PATH: "{{ nvke_workdir }}/go-{{ nvke_go_version }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  HOME: /root
+  GOTOOLCHAIN: local
+  GOPATH: "{{ nvke_workdir }}/go"
+  GOCACHE: "{{ nvke_workdir }}/go/cache"
+  CONTAINERD_ADDRESS: /run/containerd-nerdctl/containerd.sock
+  CONTAINERD_NAMESPACE: default
+  BUILDKIT_HOST: unix:///run/buildkit-nerdctl/buildkitd.sock

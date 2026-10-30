@@ -1,0 +1,141 @@
+---
+# One management-cluster node built from the NVKE node image: SPIRE pointed
+# at the bootstrap host with the site's trust bundle, the Kubernetes and
+# OVN-Kubernetes packages the image stages installed, and the TPM endorsement
+# key thumbprint read for the site spec, then every check of the Verify list
+# on NVKE's "Prepare nodes" page. Nodes provisioned with the documented user
+# data (omerfsen.nvke.kvm does) already have all of it, and nothing changes;
+# a node booted without it gets the same files and packages here.
+
+- name: The node is one the NVKE image built
+  ansible.builtin.stat:
+    path: /usr/lib/nvke/spire-configure.sh
+  register: nvke_node_image
+
+- name: The NVKE agent and SPIRE renderer are present
+  ansible.builtin.assert:
+    that: nvke_node_image.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} has no /usr/lib/nvke/spire-configure.sh: it was not
+      built from the NVKE node image (omerfsen.nvke.node_image).
+    quiet: true
+
+- name: The trust bundle and bootstrap address are set
+  ansible.builtin.assert:
+    that:
+      - nvke_spire_trust_bundle | default('') is search('BEGIN CERTIFICATE')
+      - nvke_bootstrap_ip | length > 0
+    fail_msg: Set nvke_spire_trust_bundle (the SPIRE CA certificate, PEM) and nvke_bootstrap_ip.
+    quiet: true
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  register: nvke_cloud_init
+  changed_when: false
+  failed_when: "'status: done' not in nvke_cloud_init.stdout"
+
+# ── SPIRE: the bootstrap's server and the site's CA ──────────────────────
+- name: SPIRE input directory
+  ansible.builtin.file:
+    path: /etc/nke
+    state: directory
+    mode: "0755"
+
+- name: SPIRE server, trust domain and trust bundle
+  ansible.builtin.copy:
+    dest: "{{ item.path }}"
+    mode: "{{ item.mode }}"
+    content: "{{ item.content }}"
+  loop:
+    - path: /etc/nke/spire.env
+      mode: "0600"
+      content: |
+        SPIRE_SERVER_ADDRESS={{ nvke_bootstrap_ip }}
+        SPIRE_SERVER_PORT=30081
+        SPIRE_TRUST_DOMAIN={{ nvke_trust_domain }}
+    - path: /etc/nke/trust-bundle.pem
+      mode: "0644"
+      content: "{{ nvke_spire_trust_bundle | trim }}\n"
+  loop_control: {label: "{{ item.path }}"}
+  # The image's renderer writes agent.conf from these files at boot; rerun it
+  # and the agents instead of rebooting.
+  notify: Render the SPIRE agent config and restart the agents
+
+- name: SPIRE agent and node agent start at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+  loop: [spire-agent, nvke-agent]
+
+# ── Kubernetes and the CNI, from the image's local package repository ────
+# Kubernetes first: the CNI images package loads into its containerd.
+- name: Install Kubernetes (kubeadm, kubelet, containerd)
+  ansible.builtin.apt:
+    name: nvke-kubeadm-distro-{{ nvke_k8s_version }}
+    state: present
+
+- name: Install OVN-Kubernetes
+  ansible.builtin.apt:
+    name:
+      - nvke-cni-ovn-images-{{ nvke_cni_version }}
+      - nvke-cni-ovn-charts-{{ nvke_cni_version }}
+    state: present
+
+- name: Check the kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  register: nvke_kubeadm_version
+  changed_when: false
+  failed_when: nvke_kubeadm_version.stdout != 'v' ~ nvke_k8s_version
+
+# ── The rest of the Verify list on NVKE's "Prepare nodes" page ──────────
+- name: Open vSwitch runs
+  ansible.builtin.command: ovs-vsctl show
+  changed_when: false
+  check_mode: false
+
+- name: Apply new SPIRE inputs before checking them
+  ansible.builtin.meta: flush_handlers
+
+- name: Read the rendered SPIRE agent config
+  ansible.builtin.slurp:
+    src: /etc/spire-agent/agent.conf
+  register: nvke_agent_conf
+
+- name: It points at the bootstrap host with the site's trust domain
+  ansible.builtin.assert:
+    that:
+      - nvke_agent_conf_text is search('server_address = "' ~ nvke_bootstrap_ip ~ '"')
+      - nvke_agent_conf_text is search('server_port = "30081"')
+      - nvke_agent_conf_text is search('trust_domain = "' ~ nvke_trust_domain ~ '"')
+    fail_msg: >-
+      /etc/spire-agent/agent.conf does not name {{ nvke_bootstrap_ip }}:30081 and
+      {{ nvke_trust_domain }}; see journalctl -u nvke-spire-configure.
+    quiet: true
+  vars:
+    nvke_agent_conf_text: "{{ nvke_agent_conf.content | b64decode }}"
+
+# Active means it runs and retries attestation until the bootstrap's SPIRE
+# server answers; nvke-agent keeps restarting until then, which is expected.
+- name: The SPIRE agent is active
+  ansible.builtin.systemd_service:
+    name: spire-agent
+  register: nvke_spire_active
+  check_mode: true
+  retries: 6
+  delay: 5
+  until: nvke_spire_active.status.ActiveState == 'active'
+
+# ── TPM identity ─────────────────────────────────────────────────────────
+# Busy while the SPIRE agent attests; retried.
+- name: Read the TPM endorsement key thumbprint
+  ansible.builtin.command: /usr/local/bin/get_tpm_pubhash
+  register: nvke_tpm_pubhash
+  changed_when: false
+  check_mode: false
+  retries: 10
+  delay: 3
+  until: nvke_tpm_pubhash.rc == 0 and nvke_tpm_pubhash.stdout | trim is match('^[0-9a-f]{64}$')
+
+- name: Keep it for the site spec
+  ansible.builtin.set_fact:
+    nvke_tpm_ek_thumbprint: "{{ nvke_tpm_pubhash.stdout | trim }}"
