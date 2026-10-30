@@ -7,6 +7,8 @@ as the NVKE node image) or a downloaded cloud image, with:
 - its address from a DHCP reservation added to the libvirt network (stale
   leases on that address released), or from a static cloud-init network config;
 - an optional TPM 2.0 (swtpm, TIS);
+- optional PCI passthrough of devices already bound to vfio-pci (a GPU),
+  with `managed='no'` so libvirt never detaches a device from a host driver;
 - an ed25519 keypair generated on the controller, and extra cloud-config
   (`libvirt_vm_cloud_config`) for the first boot.
 

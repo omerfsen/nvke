@@ -1,8 +1,8 @@
 ---
 # One UEFI guest on libvirt from a qcow2 or cloud image: an SSH keypair (on
 # the controller, so it can reach the guest), a DHCP reservation or a static
-# address, a cloud-init seed, an optional TPM 2.0, then virt-install. Runs on
-# the KVM host.
+# address, a cloud-init seed, an optional TPM 2.0 and PCI passthrough, then
+# virt-install. Runs on the KVM host.
 
 - name: Name and address are set
   ansible.builtin.assert:
@@ -251,6 +251,19 @@
       when: libvirt_vm_seed_dir.path is defined
 
 # ── Define and start the domain ──────────────────────────────────────────
+# managed='no' below: libvirt expects vfio-pci already there and fails the
+# start otherwise, instead of detaching the device from a host driver live.
+- name: Passed-through devices are on vfio-pci
+  ansible.builtin.shell: |
+    set -o pipefail
+    basename "$(readlink -f /sys/bus/pci/devices/{{ item }}/driver 2>/dev/null)" 2>/dev/null || echo none
+  args: {executable: /bin/bash}
+  loop: "{{ libvirt_vm_hostdevs }}"
+  register: libvirt_vm_hostdev_drivers
+  changed_when: false
+  failed_when: libvirt_vm_hostdev_drivers.stdout != 'vfio-pci'
+  check_mode: false
+
 - name: Create the VM
   ansible.builtin.command: >-
     virt-install
@@ -264,6 +277,7 @@
     --disk path={{ libvirt_vm_disk_path }}/{{ libvirt_vm_name }}-seed.iso,device=cdrom
     --network {{ libvirt_vm_nic }},model=virtio,mac={{ libvirt_vm_mac_address }}
     {{ '--tpm backend.type=emulator,backend.version=2.0,model=tpm-tis' if libvirt_vm_tpm else '' }}
+    {% for dev in libvirt_vm_hostdevs %}--hostdev {{ dev }} --xml ./devices/hostdev[{{ loop.index }}]/@managed=no {% endfor %}
     --graphics none
     --console pty,target_type=serial
     --osinfo {{ libvirt_vm_osinfo }}

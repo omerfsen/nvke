@@ -38,6 +38,11 @@ libvirt_vm_ovmf_code: /usr/share/OVMF/OVMF_CODE_4M.fd
 libvirt_vm_ovmf_vars: /usr/share/OVMF/OVMF_VARS_4M.fd
 # A TPM 2.0 (swtpm, TIS interface): NVKE nodes attest with it.
 libvirt_vm_tpm: false
+# PCI functions passed through to the VM (a GPU and its audio function), in
+# full DDDD:BB:DD.F form. Each must already be bound to vfio-pci on the host
+# (omerfsen.nvke.gpu_passthrough): the VM gets them with managed='no', so
+# libvirt never detaches a device from a host driver. Applies at creation.
+libvirt_vm_hostdevs: []
 
 libvirt_vm_user: ubuntu
 # More cloud-config for the guest's first boot (write_files, runcmd, ...),
