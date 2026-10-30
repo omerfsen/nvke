@@ -212,8 +212,9 @@ gets the GPU:
   AICR's NVKE recipe (`RUNTIME_CONFIG_SOURCE=file`: NVKE's containerd 2.3
   has a version 3 config that the toolkit's default source would see as
   version 4, and its drop-in would then stop containerd; and no GPU through
-  `NVIDIA_VISIBLE_DEVICES` in unprivileged pods), and the chart's default
-  driver, `595.91.07`. AICR holds `580.173.02` for AWS EFA only, and that
+  `NVIDIA_VISIBLE_DEVICES` in unprivileged pods), and driver `615.71.09`
+  (CUDA 13.4), the newest in the chart's component matrix; the chart's
+  default is `595.91.07`. AICR holds `580.173.02` for AWS EFA only, and that
   driver has no Ubuntu 26.04 image.
 
 The checks: the ClusterPolicy is `ready`, the cluster offers the expected

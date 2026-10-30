@@ -48,8 +48,8 @@ comes with no guarantee of any kind; see
 | Image build host | Ubuntu/Debian with KVM, of the image's architecture |
 | ansible-core | 2.16 or later |
 | Provisioning | KVM/libvirt (one hypervisor on its NAT network, or several on a shared bridge) |
-| GPU | NVIDIA GPU Operator v26.7.2 (the version AICR pins), driver 595.91.07; on KVM, one GPU passed through to a node VM with VFIO |
-| Tested | NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator ready, CUDA, TensorFlow, PyTorch and TensorRT workloads pass, rerun `changed=0` |
+| GPU | NVIDIA GPU Operator v26.7.2 (the version AICR pins), driver 615.71.09 (CUDA 13.4); on KVM, one GPU passed through to a node VM with VFIO |
+| Tested | NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator v26.7.2 ready with driver 615.71.09 (CUDA 13.4, default) and 595.91.07 (CUDA 13.2), CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both, rerun `changed=0` |
 
 ## Component versions
 
@@ -73,7 +73,7 @@ deployed versions were read off a running cluster built by `kvm.yml`.
 | Go | 1.27.3 | `nvke_go_version`, `node_image_go_version` |
 | Packer | 1.15.4 | `node_image_packer_version`, image build host |
 | NVIDIA GPU Operator | v26.7.2 | `gpu_operator_version`, chart sha256 checked; the version AICR pins |
-| NVIDIA driver | 595.91.07 | `gpu_operator_driver_version` (image `595.91.07-ubuntu26.04`) |
+| NVIDIA driver | 615.71.09 (CUDA 13.4) | `gpu_operator_driver_version` (image `615.71.09-ubuntu26.04`), the newest the chart supports; 595.91.07 (CUDA 13.2, the chart's default) also tested |
 | CUDA test image | `cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04` | `gpu_operator_smoke_test_image`, pinned by digest |
 
 Every downloaded binary is pinned to NVKE's own version and checksum

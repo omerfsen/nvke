@@ -37,9 +37,10 @@ argument_specs:
         description: Helm release name.
       gpu_operator_driver_version:
         type: str
-        default: "595.91.07"
+        default: "615.71.09"
         description:
-          - NVIDIA driver the operator builds on each GPU node. A driver image for the node's Ubuntu release must exist
+          - NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.4).
+          - A driver image for the node's Ubuntu release must exist
           - (C(nvcr.io/nvidia/driver:<version>-ubuntu26.04) for the default node image).
       gpu_operator_values:
         type: dict

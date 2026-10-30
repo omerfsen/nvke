@@ -12,9 +12,11 @@ gpu_operator_chart_url: https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-{
 gpu_operator_chart_sha256: a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6
 gpu_operator_namespace: gpu-operator
 gpu_operator_release: gpu-operator
-# The chart's own default driver. AICR holds 580.173.02, for AWS EFA only, and
-# publishes no Ubuntu 26.04 image for it; 595.91.07 has one.
-gpu_operator_driver_version: "595.91.07"
+# The newest driver the chart supports (its component matrix: 615.71.09,
+# 610.57.04, 595.91.07 recommended and default, 580.173.02), for CUDA 13.4.
+# AICR holds 580.173.02, for AWS EFA only, and NVIDIA publishes no Ubuntu
+# 26.04 image of it.
+gpu_operator_driver_version: "615.71.09"
 # More chart values, merged over the role's (vars/main.yml).
 gpu_operator_values: {}
 gpu_operator_helm: /usr/local/bin/helm

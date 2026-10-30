@@ -413,3 +413,39 @@ configuration file), so namespaces are privileged unless labelled.
 TensorRT 26.09 is built for a newer CUDA 13 than driver 595 ships, and runs
 under CUDA's minor version compatibility. `tests/` is left out of the Galaxy
 tarball (`build_ignore`).
+
+### The newest driver: 615.71.09
+
+GPU Operator `v26.7.2` is the newest chart (NGC: v26.7.0, v26.7.1, v26.7.2),
+so the newer CUDA has to come from the driver. The chart's component matrix
+for v26.7.2 lists 615.71.09, 610.57.04, 595.91.07 (recommended and default)
+and 580.173.02; the v26.7.1 notes say "Added support for NVIDIA Data Center
+GPU Driver 615.71.09", and NGC has `615.71.09-ubuntu26.04`. The one known
+issue (595 to 615 on H100 with MIG, without a GPU reset) does not apply to
+this card. The role's default is now `615.71.09`, for CUDA 13.4.
+
+On the running cluster, `kvm.yml` changed exactly two things, the values
+file and the release (`helm history`: revision 2, "Upgrade complete"); the
+driver container rebuilt the module and the role's CUDA pod passed again
+(5m50s in all).
+
+```text
+NVIDIA-SMI 615.71.09   KMD Version: 615.71.09   CUDA UMD Version: 13.4
+
+01-gpu-nvidia-smi            PASS         5s
+02-gpu-cuda-vectoradd        PASS         5s
+03-gpu-tensorflow            PASS        30s
+04-gpu-pytorch               PASS        10s
+05-gpu-tensorrt              PASS        10s
+06-gpu-operator-metrics      PASS         5s
+```
+
+Both drivers, 595.91.07 (CUDA 13.2) and 615.71.09 (CUDA 13.4), ran every
+test on this node. Rerun with 615.71.09: `changed=0` on all five hosts, 1m49s.
+
+### Kubernetes 1.37
+
+NVKE v0.22.0 supports Kubernetes 1.36.3 only. Its node image also stages
+`nvke-kubeadm-distro` packages for 1.37.2, which the docs list as not
+supported; v0.23.0-rc.2 still pins 1.36.3, and its qualification stream is
+`forge-gb200-amd64-ubuntu-24.04-kube-1.36`. The collection stays on 1.36.3.

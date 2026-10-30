@@ -162,7 +162,7 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | `gpu_operator_chart_sha256` | str | `a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6` | SHA-256 of the chart archive. |
 | `gpu_operator_namespace` | str | `gpu-operator` | Namespace of the release, labelled to admit privileged pods. |
 | `gpu_operator_release` | str | `gpu-operator` | Helm release name. |
-| `gpu_operator_driver_version` | str | `595.91.07` | NVIDIA driver the operator builds on each GPU node. A driver image for the node's Ubuntu release must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04` for the default node image). |
+| `gpu_operator_driver_version` | str | `615.71.09` | NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.4). A driver image for the node's Ubuntu release must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04` for the default node image). |
 | `gpu_operator_values` | dict | `{}` | More chart values, merged over the role's. |
 | `gpu_operator_helm` | path | `/usr/local/bin/helm` | helm on the target host. |
 | `gpu_operator_kubectl` | path | `/usr/local/bin/kubectl` | kubectl on the target host. |
