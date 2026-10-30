@@ -1,0 +1,30 @@
+---
+# NVIDIA GPU Operator on an NVKE cluster: the NVKE node image carries no GPU
+# driver, the GPU Operator installs it. Runs on a host with helm, kubectl and
+# the cluster's admin kubeconfig (the bootstrap host).
+
+# Admin kubeconfig on the target host.
+gpu_operator_kubeconfig: ""
+# The chart AICR (NVIDIA AI Cluster Runtime) pins, v1.1.2 and v1.2.0-rc0,
+# checksum from the NGC Helm repository index.
+gpu_operator_version: v26.7.2
+gpu_operator_chart_url: https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-{{ gpu_operator_version }}.tgz
+gpu_operator_chart_sha256: a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6
+gpu_operator_namespace: gpu-operator
+gpu_operator_release: gpu-operator
+# The chart's own default driver. AICR holds 580.173.02, for AWS EFA only, and
+# publishes no Ubuntu 26.04 image for it; 595.91.07 has one.
+gpu_operator_driver_version: "595.91.07"
+# More chart values, merged over the role's (vars/main.yml).
+gpu_operator_values: {}
+gpu_operator_helm: /usr/local/bin/helm
+gpu_operator_kubectl: /usr/local/bin/kubectl
+gpu_operator_workdir: /var/lib/nvke/gpu-operator
+# How long to wait for the operands; the driver is built on each GPU node.
+gpu_operator_timeout_minutes: 30
+# GPUs the cluster must offer (nvidia.com/gpu, summed over the nodes).
+gpu_operator_expected_gpus: 1
+# Run a CUDA vectorAdd pod on a GPU after the install and delete it again.
+gpu_operator_smoke_test: true
+gpu_operator_smoke_test_image: >-
+  nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04@sha256:7c7540bdf1f942d4fb6db97069fd6c289471b54ac29e3c7fcdf914cf77af7d41

@@ -1,0 +1,114 @@
+---
+# The GPU Operator from a pinned chart, with the values AICR uses on NVKE.
+# Installed or upgraded only when the release's chart or values differ, so a
+# rerun changes nothing. Then the docs' checks: every operand ready, the
+# expected GPUs allocatable, and a CUDA pod that passes.
+
+- name: The kubeconfig is set
+  ansible.builtin.assert:
+    that: gpu_operator_kubeconfig | length > 0
+    fail_msg: Set gpu_operator_kubeconfig to the cluster's admin kubeconfig on this host.
+    quiet: true
+
+- name: Chart directory
+  ansible.builtin.file:
+    path: "{{ gpu_operator_workdir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Fetch the chart (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ gpu_operator_chart_url }}"
+    dest: "{{ gpu_operator_workdir }}/gpu-operator-{{ gpu_operator_version }}.tgz"
+    checksum: "sha256:{{ gpu_operator_chart_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 120
+
+- name: The release's values
+  ansible.builtin.set_fact:
+    gpu_operator_release_values: "{{ gpu_operator_base_values | combine(gpu_operator_values, recursive=True) }}"
+
+- name: Write the values file
+  ansible.builtin.copy:
+    dest: "{{ gpu_operator_workdir }}/values.yaml"
+    content: "{{ gpu_operator_release_values | to_nice_yaml(indent=2) }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+# The operands are privileged DaemonSets: the namespace must allow them under
+# any Pod Security admission default the cluster has.
+- name: Namespace that admits privileged pods
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ gpu_operator_kubectl }} apply -f - <<'NS'
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: {{ gpu_operator_namespace }}
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+    NS
+  args: {executable: /bin/bash}
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  register: gpu_operator_ns
+  changed_when: "'unchanged' not in gpu_operator_ns.stdout"
+
+- name: Read the installed release
+  ansible.builtin.shell: |
+    set -o pipefail
+    if {{ gpu_operator_helm }} status {{ gpu_operator_release }} -n {{ gpu_operator_namespace }} >/dev/null 2>&1; then
+      {{ gpu_operator_helm }} get metadata {{ gpu_operator_release }} -n {{ gpu_operator_namespace }} -o json
+      {{ gpu_operator_helm }} get values {{ gpu_operator_release }} -n {{ gpu_operator_namespace }} -o json
+    fi
+  args: {executable: /bin/bash}
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  register: gpu_operator_installed
+  changed_when: false
+  check_mode: false
+
+- name: Install or upgrade the release when its chart or values differ
+  ansible.builtin.command: >-
+    {{ gpu_operator_helm }} upgrade --install {{ gpu_operator_release }}
+    {{ gpu_operator_workdir }}/gpu-operator-{{ gpu_operator_version }}.tgz
+    -n {{ gpu_operator_namespace }}
+    -f {{ gpu_operator_workdir }}/values.yaml
+    --wait --timeout 10m
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  when: >-
+    gpu_operator_installed.stdout_lines | length < 2
+    or (gpu_operator_installed.stdout_lines[0] | from_json).version != gpu_operator_version
+    or (gpu_operator_installed.stdout_lines[1] | from_json) != gpu_operator_release_values
+    or (gpu_operator_installed.stdout_lines[0] | from_json).status != 'deployed'
+  changed_when: true
+
+- name: Wait for every operand (the driver is built on each GPU node)
+  ansible.builtin.command: >-
+    {{ gpu_operator_kubectl }} wait clusterpolicies.nvidia.com/cluster-policy
+    --for=jsonpath={.status.state}=ready --timeout={{ gpu_operator_timeout_minutes }}m
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  changed_when: false
+
+- name: Count the allocatable GPUs
+  ansible.builtin.command: >-
+    {{ gpu_operator_kubectl }} get nodes -o 'jsonpath={.items[*].status.allocatable.nvidia\.com/gpu}'
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  register: gpu_operator_gpus
+  changed_when: false
+  check_mode: false
+  retries: 30
+  delay: 10
+  until: gpu_operator_gpus.stdout.split() | map('int') | sum >= gpu_operator_expected_gpus | int
+
+- name: Run a CUDA pod on a GPU
+  ansible.builtin.include_tasks: smoke_test.yml
+  when: gpu_operator_smoke_test | bool

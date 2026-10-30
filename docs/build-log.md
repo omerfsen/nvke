@@ -270,3 +270,66 @@ failed: [localhost] (item=0000:01:00.0)   # still on nvidia: reboot first
 The lint venv failed first: `python3` on this host's PATH is Python 3.15,
 which ansible-core 2.16 does not support (`ImportError: cannot import name
 '_MISSING_TYPE'`). `make dev PYTHON=<python3.12>` picks the interpreter.
+
+After the reboot both functions are on vfio-pci (`lspci -nnk -s 01:00`:
+`Kernel driver in use: vfio-pci`) and a rerun of `gpu_passthrough.yml` is
+`changed=0`. The host no longer has `nvidia-smi`; the IP-KVM console stays on
+the iGPU.
+
+### The GPU node VM
+
+`libvirt_vm` takes `libvirt_vm_hostdevs`. virt-install 4.1 has no `managed=`
+sub-option for `--hostdev`, so each one gets
+`--xml ./devices/hostdev[N]/@managed=no`: libvirt then never detaches the card
+from a host driver, and fails the start if vfio-pci does not own it (the role
+checks that first). The card's BAR1 is 16 GiB (Resizable BAR is on); OVMF
+2024.02 with a `host-passthrough` CPU sizes its 64-bit window for it, as it
+did for the same card in an earlier VM on this host, so no MMIO override.
+
+In the KVM inventory the last node (`nvke-cp-03`) gets the GPU
+(`nvke_kvm_gpu_vm`) and a bigger size (`nvke_kvm_gpu_vm_size`: 8 vCPU,
+24 GiB, 120 GiB): the driver is built on the node, and VFIO pins all of the
+VM's memory.
+
+### Which GPU Operator
+
+NVKE leaves the GPU stack to AICR (NVIDIA AI Cluster Runtime): "an AICR
+recipe bundle is deployed to the tenant cluster, installing Nodewright, GPU
+Operator, and the full validated software stack" (`docs/dsx-stack.md` at
+v0.22.0). AICR's only stable release with recipes is v1.1.2, which has no
+`nvke` service; v1.2.0-rc0 (a prerelease from 2026-10-29) adds an `nvke`
+overlay and a GB200 leaf. Both pin GPU Operator `v26.7.2`. AICR's binary is
+not run here: its recipe data was read from the tagged source.
+
+- The chart: `gpu-operator-v26.7.2.tgz` from the NGC Helm repository,
+  sha256 `a94a8862...ae1bf6`, the digest in the repository's `index.yaml`.
+- The driver: AICR holds `580.173.02`, "deliberately behind" the chart's
+  `595.91.07`, because R595 breaks EFA on AWS P6e-GB200. NGC has
+  `580.173.02-ubuntu22.04` and `-ubuntu24.04` images but none for Ubuntu
+  26.04; `595.91.07-ubuntu26.04` exists (also `610.57.04` and `615.71.09`).
+  The node image is 26.04.1, so the role keeps the chart's default,
+  `595.91.07`.
+- The toolkit values from AICR's NVKE leaf: `RUNTIME_CONFIG_SOURCE=file`
+  (NVKE v0.22.0 ships containerd 2.3 with a version 3 `config.toml`; the
+  default source, `containerd config dump`, reports version 4 and the
+  drop-in then stops containerd) and
+  `ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`.
+- The rest of AICR's stack (NVSentinel, Nodewright, kube-prometheus-stack,
+  DRA driver, Network Operator) is left out; the chart's own NFD subchart
+  labels the nodes.
+
+`omerfsen.nvke.gpu_operator` installs that from the bootstrap host (it has
+helm v4.2.4, kubectl and the admin kubeconfig), only when the release's chart
+or values differ, waits for the ClusterPolicy to be `ready`, checks that
+`nvidia.com/gpu` is allocatable, and runs a CUDA vectorAdd pod (image pinned
+by digest) on the GPU, deleting it afterwards.
+
+### The VMs had no way out
+
+libvirt's `default` network on this host was defined with
+`<forward dev='eno1' mode='nat'>`. `eno1` is a port of the bridge `br1`,
+which holds the host's address and default route, so traffic from the VMs
+leaves through `br1` and hits libvirt's own rule
+`-A LIBVIRT_FWO -i virbr0 -j REJECT`: only `-o eno1` is accepted and
+masqueraded. A host-specific fault, not the collection's: the network's
+forward device has to be the interface the default route uses, or none.

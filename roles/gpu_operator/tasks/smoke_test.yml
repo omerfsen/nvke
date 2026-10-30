@@ -1,0 +1,55 @@
+---
+# A CUDA vectorAdd pod requesting one GPU, run to completion and deleted
+# again: it leaves nothing behind, so it never reports a change.
+
+- name: Remove a test pod left by an interrupted run
+  ansible.builtin.command: >-
+    {{ gpu_operator_kubectl }} delete pod gpu-operator-smoke-test -n {{ gpu_operator_namespace }}
+    --ignore-not-found --wait
+  environment:
+    KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+  changed_when: false
+
+- name: Run vectorAdd on one GPU
+  block:
+    - name: Start the test pod
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ gpu_operator_kubectl }} apply -f - <<'POD'
+        {{ lookup('ansible.builtin.template', 'smoke-test-pod.yaml.j2') }}
+        POD
+      args: {executable: /bin/bash}
+      environment:
+        KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+      changed_when: false
+
+    - name: Wait for it to finish
+      ansible.builtin.command: >-
+        {{ gpu_operator_kubectl }} wait pod/gpu-operator-smoke-test -n {{ gpu_operator_namespace }}
+        --for=jsonpath={.status.phase}=Succeeded --timeout=10m
+      environment:
+        KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+      changed_when: false
+
+    - name: Read its output
+      ansible.builtin.command: >-
+        {{ gpu_operator_kubectl }} logs gpu-operator-smoke-test -n {{ gpu_operator_namespace }}
+      environment:
+        KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+      register: gpu_operator_smoke_log
+      changed_when: false
+
+    - name: CUDA ran on the GPU
+      ansible.builtin.assert:
+        that: "'Test PASSED' in gpu_operator_smoke_log.stdout"
+        fail_msg: "vectorAdd did not pass: {{ gpu_operator_smoke_log.stdout }}"
+        success_msg: "{{ gpu_operator_smoke_log.stdout_lines | join(' / ') }}"
+
+  always:
+    - name: Delete the test pod
+      ansible.builtin.command: >-
+        {{ gpu_operator_kubectl }} delete pod gpu-operator-smoke-test -n {{ gpu_operator_namespace }}
+        --ignore-not-found --wait
+      environment:
+        KUBECONFIG: "{{ gpu_operator_kubeconfig }}"
+      changed_when: false

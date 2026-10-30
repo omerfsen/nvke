@@ -57,7 +57,7 @@ nvke_kvm_ssh_key_dir: ~/.ssh/nvke
 nvke_kvm_disk_path: /var/lib/libvirt/images
 
 # Built from the above. Every VM: name, ip, mac, group, kvm_host, vcpus,
-# memory_mb, disk_gb, tpm. The bootstrap host first, on the first
+# memory_mb, disk_gb, tpm, hostdevs. The bootstrap host first, on the first
 # hypervisor; then the nodes, round robin over kvm_hosts.
 nvke_kvm_vms: >-
   {%- set hosts = groups['kvm_hosts'] -%}
@@ -66,18 +66,20 @@ nvke_kvm_vms: >-
         'name': name,
         'mac': nvke_kvm_macs[name] | default(nvke_kvm_mac_prefix ~ ':' ~ nvke_kvm_mac_middle ~ ':' ~ '%02x' % (nvke_kvm_bootstrap_octet | int)),
         'ip': nvke_kvm_subnet ~ '.' ~ nvke_kvm_bootstrap_octet,
-        'group': 'nvke_bootstrap', 'tpm': false,
+        'group': 'nvke_bootstrap', 'tpm': false, 'hostdevs': [],
         'kvm_host': hosts[0]})
       | combine(nvke_kvm_vm_sizes[name] | default({}))] -%}
   {%- for i in range(1, nvke_kvm_node_count | int + 1) -%}
   {%-   set name = nvke_kvm_name_prefix ~ '-cp-' ~ '%02d' % i -%}
   {%-   set octet = nvke_kvm_node_octet_base | int + i -%}
-  {%-   set _ = vms.append(nvke_kvm_node_size | combine({
+  {%-   set gpu = name == nvke_kvm_gpu_vm and nvke_kvm_gpu_devices | length > 0 -%}
+  {%-   set _ = vms.append(nvke_kvm_node_size | combine(nvke_kvm_gpu_vm_size if gpu else {}) | combine({
           'name': name,
           'ip': nvke_kvm_subnet ~ '.' ~ octet,
           'mac': nvke_kvm_macs[name] | default(nvke_kvm_mac_prefix ~ ':' ~ nvke_kvm_mac_middle ~ ':' ~ '%02x' % octet),
           'group': 'nvke_nodes', 'tpm': true,
-          'kvm_host': hosts[(i - 1) % hosts | length]})
+          'hostdevs': nvke_kvm_gpu_devices if gpu else [],
+          'kvm_host': hosts[0] if gpu else hosts[(i - 1) % hosts | length]})
         | combine(nvke_kvm_vm_sizes[name] | default({}))) -%}
   {%- endfor -%}
   {{ vms }}
@@ -90,6 +92,12 @@ nvke_kvm_gpu_devices: []
 # permanent: vfio-pci owns them from boot; off: give them back to the host.
 # Either takes effect after a reboot of the hypervisor.
 nvke_kvm_gpu_passthrough_mode: permanent
+# The node VM that gets them (on the first hypervisor), and its size: the
+# GPU driver is built on the node, and VFIO pins all of the VM's memory.
+nvke_kvm_gpu_vm: "{{ nvke_kvm_name_prefix }}-cp-{{ '%02d' % (nvke_kvm_node_count | int) }}"
+nvke_kvm_gpu_vm_size: {vcpus: 8, memory_mb: 24576, disk_gb: 120}
+# The NVIDIA GPU Operator (omerfsen.nvke.gpu_operator) once the cluster is up.
+nvke_gpu_operator: "{{ nvke_kvm_gpu_devices | length > 0 }}"
 
 # ── Cluster (role omerfsen.nvke.nvke) ────────────────────────────────────
 nvke_cluster_name: nvke-mgmt
