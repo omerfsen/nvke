@@ -90,6 +90,14 @@ argument_specs:
         type: bool
         default: false
         description: Give the guest a TPM 2.0 (swtpm emulator, TIS interface).
+      libvirt_vm_hostdevs:
+        type: list
+        elements: str
+        default: []
+        description:
+          - PCI functions passed through to the VM, in full C(DDDD:BB:DD.F) form (a GPU and its audio function).
+          - Each must be bound to vfio-pci on the host already (M(omerfsen.nvke.gpu_passthrough) role); the VM gets them with C(managed='no').
+          - Applies when the VM is created.
       libvirt_vm_user:
         type: str
         default: ubuntu

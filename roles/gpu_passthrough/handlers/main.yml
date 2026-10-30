@@ -1,0 +1,4 @@
+---
+- name: Rebuild the initrd
+  ansible.builtin.command: update-initramfs -u -k all
+  changed_when: true

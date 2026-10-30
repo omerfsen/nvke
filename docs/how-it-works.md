@@ -7,8 +7,8 @@ page walks through the steps in the order they run, with the docs page each
 one comes from.
 
 NVKE's docs split an installation into seven steps. This release does the
-first three; the rest need the management plane and NVIDIA Infra Controller
-(NICo), which come later.
+first three, and adds GPU nodes; the rest need the management plane and
+NVIDIA Infra Controller (NICo), which come later.
 
 | Docs step | What | Here |
 |---|---|---|
@@ -16,6 +16,7 @@ first three; the rest need the management plane and NVIDIA Infra Controller
 | 2. Prepare nodes | Boot the nodes from it with cloud-init user data, record their TPM thumbprints | `libvirt_vm` + `nvke` (`bootstrap_host`, `node`) |
 | 3. Bootstrap | `nvkectl bootstrap site` forms the management cluster | `nvke` (`site`) |
 | 4-7 | Management plane, NICo, API security, workload clusters | not yet |
+| GPU runtime | The NVIDIA GPU Operator, as AICR installs it | `gpu_passthrough`, `libvirt_vm`, `gpu_operator` |
 
 ## The release
 
@@ -186,6 +187,39 @@ taint is left, the seed cluster is gone.
 
 Keep `~/.nvke/<cluster>/` safe: the docs ask for the kubeconfig and the key
 file to go to secure storage.
+
+## 7. GPU nodes
+
+Docs: *Build and verify your own node image* ("`nvke-agent` installs
+Kubernetes later, and the NVIDIA GPU Operator installs GPU drivers"); *What
+is NVKE* (the accelerated runtime comes from NVIDIA AI Cluster Runtime,
+AICR).
+
+A GPU node is an NVKE node like the others, booted from the node image; the
+GPU Operator gives it the driver. NVKE's GPU nodes normally come from NICo
+into workload clusters. Without NICo, on KVM, a management-cluster node VM
+gets the GPU:
+
+- **The hypervisor** (`gpu_passthrough`): the GPU and every function in its
+  IOMMU group are bound to vfio-pci from the initrd, the host NVIDIA and
+  nouveau drivers are kept from loading, and one reboot applies it. Nothing
+  is ever detached from a running driver.
+- **The VM** (`libvirt_vm`, `libvirt_vm_hostdevs`): the functions are
+  attached with `managed='no'`, so libvirt fails the start rather than take a
+  device from a host driver.
+- **The GPU Operator** (`gpu_operator`), from the bootstrap host: the chart
+  version AICR pins (`v26.7.2`, checksum verified), the toolkit values of
+  AICR's NVKE recipe (`RUNTIME_CONFIG_SOURCE=file`: NVKE's containerd 2.3
+  has a version 3 config that the toolkit's default source would see as
+  version 4, and its drop-in would then stop containerd; and no GPU through
+  `NVIDIA_VISIBLE_DEVICES` in unprivileged pods), and driver `615.71.09`
+  (CUDA 13.4), the newest in the chart's component matrix; the chart's
+  default is `595.91.07`. AICR holds `580.173.02` for AWS EFA only, and that
+  driver has no Ubuntu 26.04 image.
+
+The checks: the ClusterPolicy is `ready`, the cluster offers the expected
+`nvidia.com/gpu` count, and a CUDA vectorAdd pod (image pinned by digest)
+passes on a GPU and is deleted again.
 
 ## What the management cluster is not
 

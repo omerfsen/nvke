@@ -1,0 +1,76 @@
+---
+# vfio-pci claims the devices from the initrd and the host GPU drivers never
+# load, so nothing has to be detached live. Takes effect after one reboot.
+
+# blacklist alone only stops loading by device alias: the NVIDIA packages'
+# udev rule still runs modprobe for nvidia-drm, nvidia-modeset and
+# nvidia-uvm whenever the driver registers, and with the card on vfio-pci
+# every load fails and retriggers the rule, flooding the console.
+# "install <module> /bin/false" makes modprobe refuse them.
+- name: Keep the host GPU drivers from loading
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/blacklist-gpu-passthrough.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # omerfsen.nvke.gpu_passthrough
+      blacklist nouveau
+      blacklist nvidia
+      blacklist nvidia_drm
+      blacklist nvidia_modeset
+      blacklist nvidia_uvm
+      options nouveau modeset=0
+      install nvidia /bin/false
+      install nvidia_drm /bin/false
+      install nvidia_modeset /bin/false
+      install nvidia_uvm /bin/false
+  register: gpu_passthrough_blacklist
+
+# The softdeps load vfio-pci first for anything that still loads a driver by
+# name (the HDMI audio function through snd_hda_intel), so vfio-pci has
+# claimed the ids by then.
+- name: Bind the devices to vfio-pci at boot
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/vfio.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # omerfsen.nvke.gpu_passthrough
+      options vfio-pci ids={{ gpu_passthrough_state.results | map(attribute='stdout_lines') | map('first') | unique | join(',') }} disable_vga=1
+      softdep nvidia pre: vfio-pci
+      softdep nouveau pre: vfio-pci
+      softdep snd_hda_intel pre: vfio-pci
+  register: gpu_passthrough_vfio
+
+- name: Load vfio-pci at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/vfio-pci.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # omerfsen.nvke.gpu_passthrough
+      vfio-pci
+  register: gpu_passthrough_modload
+
+# A task, not a handler: the gate below fails on a first run by design, and
+# handlers do not run after a failure.
+- name: Rebuild the initrd with the vfio-pci binding
+  ansible.builtin.command: update-initramfs -u -k all
+  when: gpu_passthrough_blacklist.changed or gpu_passthrough_vfio.changed or gpu_passthrough_modload.changed
+  changed_when: true
+
+- name: Every device is on vfio-pci
+  ansible.builtin.assert:
+    that: item.stdout_lines[1] == 'vfio-pci'
+    fail_msg: >-
+      {{ item.item }} is on {{ item.stdout_lines[1] }}, not vfio-pci. On a first
+      run this is expected: reboot the host and run the playbook again. If it
+      persists after a reboot, check that the initrd has the binding:
+      lsinitramfs /boot/initrd.img-$(uname -r) | grep vfio
+    quiet: true
+  loop: "{{ gpu_passthrough_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"

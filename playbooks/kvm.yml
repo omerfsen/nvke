@@ -3,9 +3,14 @@
 # image; the bootstrap host and the site's SPIRE CA; the nodes, booted from the
 # image with the documented cloud-init user data (SPIRE pointed at the
 # bootstrap host, Kubernetes and OVN-Kubernetes packages installed); the BGP
-# peer for the API VIP; then the management cluster.
+# peer for the API VIP; then the management cluster. With a GPU passed
+# through (nvke_kvm_gpu_devices), the hypervisor binds it to vfio-pci first,
+# one node VM gets it, and the GPU Operator runs last.
 #
 #   ansible-playbook -i inventory/kvm omerfsen.nvke.kvm
+
+- name: GPU passthrough
+  ansible.builtin.import_playbook: gpu_passthrough.yml
 
 - name: Node image
   ansible.builtin.import_playbook: image.yml
@@ -109,6 +114,7 @@
         libvirt_vm_memory_mb: "{{ nvke_kvm_vm.memory_mb }}"
         libvirt_vm_disk_gb: "{{ nvke_kvm_vm.disk_gb }}"
         libvirt_vm_tpm: true
+        libvirt_vm_hostdevs: "{{ nvke_kvm_vm.hostdevs }}"
         libvirt_vm_image_path: "{{ hostvars[groups['kvm_hosts'][0]].node_image_path }}"
         libvirt_vm_cloud_config: "{{ hostvars[groups['nvke_bootstrap'][0]].nvke_node_cloud_config }}"
         libvirt_vm_network: "{{ nvke_kvm_network }}"
@@ -138,3 +144,6 @@
 
 - name: NVKE management cluster
   ansible.builtin.import_playbook: cluster.yml
+
+- name: NVIDIA GPU Operator
+  ansible.builtin.import_playbook: gpu_operator.yml

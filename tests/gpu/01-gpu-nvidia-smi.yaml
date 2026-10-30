@@ -1,0 +1,26 @@
+# The GPU reaches a plain pod. No runtimeClassName: on NVKE containerd's
+# default runtime stays runc, and the device plugin hands the GPU to the
+# container through CDI (the driver's tools and libraries with it).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-nvidia-smi
+  namespace: nvke-gpu-tests
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: nvcr.io/nvidia/cuda:13.4.3-base-ubuntu24.04@sha256:07adb6792c59025f2c45bfb1a3f1d1148bf6d48bf2326d604a6b2e24c4f04d6f
+          command: [bash, -c]
+          args:
+            - |
+              set -e
+              nvidia-smi -L | grep -q '^GPU 0'
+              nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+              echo "PASS: driver injected, GPU visible"
+          resources:
+            limits:
+              nvidia.com/gpu: 1

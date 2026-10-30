@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: Hand NVIDIA GPUs on a KVM host to VMs with VFIO, bound to vfio-pci from boot.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags: [gpu, vfio, kvm, passthrough, nvidia]
+dependencies: []

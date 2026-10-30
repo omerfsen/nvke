@@ -2,6 +2,7 @@
 SHELL := /bin/bash
 VENV := .venv
 BIN := $(VENV)/bin
+PYTHON ?= python3
 
 .PHONY: help dev lint docs image kvm kvm-destroy build
 
@@ -15,7 +16,7 @@ help:
 	@echo "  make build         build the collection tarball for Galaxy"
 
 $(BIN)/ansible-playbook:
-	python3 -m venv $(VENV)
+	$(PYTHON) -m venv $(VENV)
 	$(BIN)/pip install -q -r requirements.txt
 
 dev: $(BIN)/ansible-playbook

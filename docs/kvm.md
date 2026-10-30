@@ -19,7 +19,7 @@ With the defaults in `inventory/kvm/group_vars/all/defaults.yml`:
 | `nvke-bootstrap` | 192.168.122.100 | Ubuntu 24.04 cloud image | 4 vCPU, 8 GiB, 40 GiB | bootstrap host |
 | `nvke-cp-01` | 192.168.122.101 | NVKE node image, Ubuntu 26.04.1 | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0 |
 | `nvke-cp-02` | 192.168.122.102 | NVKE node image | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0 |
-| `nvke-cp-03` | 192.168.122.103 | NVKE node image | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0 |
+| `nvke-cp-03` | 192.168.122.103 | NVKE node image | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0; the GPU node with a GPU passed through (8 vCPU, 24 GiB, 120 GiB) |
 | API VIP | 10.250.0.10 | | | announced over BGP |
 
 Every VM is UEFI (OVMF without Secure Boot), q35, virtio, with a
@@ -132,6 +132,57 @@ With `nvke_kvm_bridge` set (VMs bridged onto your LAN), there is no BGP peer
 on the hypervisor: peer your LAN router with the nodes (AS 65100 to
 AS 4294967000) and reserve the addresses in your DHCP server.
 
+## GPU nodes
+
+NVKE nodes boot the NVKE node image, which carries no GPU driver: the NVIDIA
+GPU Operator installs it on the node. A GPU node on KVM is therefore a node VM
+that owns the GPU through VFIO. Name the GPU's PCI functions in a gitignored
+override:
+
+```yaml
+# inventory/kvm/group_vars/all/local.yml
+nvke_kvm_gpu_devices: ["0000:01:00.0", "0000:01:00.1"]   # lspci -Dnn | grep -i nvidia
+```
+
+`kvm.yml` then:
+
+1. binds them to vfio-pci from boot on the first hypervisor
+   (`omerfsen.nvke.gpu_passthrough`). The first run stops there and asks for
+   a reboot of the hypervisor; run the playbook again after it;
+2. gives them to the last node, `nvke-cp-03` (`nvke_kvm_gpu_vm`), with a
+   bigger size (`nvke_kvm_gpu_vm_size`: 8 vCPU, 24 GiB, 120 GiB), placed on
+   the first hypervisor;
+3. after the cluster, installs the GPU Operator from the bootstrap host
+   (`omerfsen.nvke.gpu_operator`) and runs a CUDA pod on the GPU.
+
+Every function in the GPU's IOMMU group must be listed (a VM owns a whole
+group); the role checks it. With the GPU on vfio-pci the host cannot use it,
+and a display attached to it stays dark. Give it back with
+`nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
+reboot.
+
+In NVKE's design GPU nodes belong to workload clusters that NVIDIA Infra
+Controller (NICo) provisions on bare metal. Without NICo the GPU goes to a
+management-cluster node: the management cluster then runs GPU workloads
+itself.
+
+```shell
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
+kubectl -n gpu-operator get clusterpolicy cluster-policy   # STATUS ready
+```
+
+Sample GPU workloads, one at a time (each takes the whole GPU), from a
+checkout; every image is pinned by digest:
+
+```shell
+tests/gpu/run.sh            # nvidia-smi, CUDA vectorAdd, TensorFlow, PyTorch, TensorRT, DCGM metrics
+tests/gpu/run.sh pytorch    # one of them
+```
+
+On NVKE containerd's default runtime stays `runc`: the device plugin hands
+the GPU and the driver's libraries to the container through CDI, so a pod
+needs only a `nvidia.com/gpu` request, no `runtimeClassName`.
+
 ## SSH into the VMs
 
 Every VM gets its own ed25519 keypair, generated on the controller in
@@ -218,4 +269,6 @@ kubeconfig. The cluster's credentials directory (`~/.nvke/nvke-mgmt`) is
 renamed to `~/.nvke/nvke-mgmt.destroyed-<time>`, not deleted: it holds the
 only off-node copy of the etcd encryption key. The node image, the downloads
 and the SSH keys stay, so the next run builds nothing; FRR stays configured
-and simply has no sessions.
+and simply has no sessions. A GPU stays on vfio-pci: give it back to the host with
+`nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
+reboot.

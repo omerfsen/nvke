@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Omer Sen
+  description: Install the NVIDIA GPU Operator on an NVKE cluster from a pinned, checksum-verified chart, and prove a GPU runs CUDA.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags: [nvidia, gpu, kubernetes, nvke, gpuoperator]
+dependencies: []

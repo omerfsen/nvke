@@ -1,0 +1,19 @@
+---
+# Hand the first hypervisor's GPU (nvke_kvm_gpu_devices) to vfio-pci from
+# boot, for the GPU node VM, which is placed there. A first run stops and asks
+# for a reboot of the hypervisor.
+#
+#   ansible-playbook -i inventory/kvm omerfsen.nvke.gpu_passthrough
+
+- name: GPU passthrough on the hypervisors
+  hosts: kvm_hosts[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Bind the GPUs to vfio-pci
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.gpu_passthrough
+      vars:
+        gpu_passthrough_devices: "{{ nvke_kvm_gpu_devices }}"
+        gpu_passthrough_mode: "{{ nvke_kvm_gpu_passthrough_mode }}"
+      when: nvke_kvm_gpu_devices | length > 0

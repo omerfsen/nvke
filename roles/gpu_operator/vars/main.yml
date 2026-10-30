@@ -1,0 +1,24 @@
+---
+# Chart values. AICR's NVKE recipe (gb200-nvke-ubuntu-training, v1.2.0-rc0)
+# sets the toolkit ones: NVKE's image ships containerd 2.3 with a version 3
+# config.toml, and the toolkit's default config source (containerd config
+# dump) reports the migrated version 4, so its drop-in is rejected and
+# containerd crash-loops. Reading the file keeps the host's version. GPUs
+# reach a pod only through a nvidia.com/gpu request (or DRA), not through
+# NVIDIA_VISIBLE_DEVICES in an unprivileged container.
+gpu_operator_base_values:
+  driver:
+    enabled: true
+    version: "{{ gpu_operator_driver_version }}"
+    kernelModuleType: auto
+  toolkit:
+    enabled: true
+    env:
+      - name: RUNTIME_CONFIG_SOURCE
+        value: file
+      - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+        value: "false"
+  devicePlugin:
+    env:
+      - name: DEVICE_LIST_STRATEGY
+        value: cdi-cri,cdi-annotations,volume-mounts

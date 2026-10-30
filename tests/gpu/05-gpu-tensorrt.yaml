@@ -1,0 +1,31 @@
+# TensorRT builds an engine on the GPU (a tiny identity network), not just
+# "import tensorrt".
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-tensorrt
+  namespace: nvke-gpu-tests
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: nvcr.io/nvidia/tensorrt:26.09-py3@sha256:651006ce4ec6f361a10b3d9595cba50d263044d18df82be67969c2ff4501db25
+          command: [python3, -c]
+          args:
+            - |
+              import tensorrt as trt
+              print("TensorRT", trt.__version__)
+              logger = trt.Logger(trt.Logger.WARNING)
+              builder = trt.Builder(logger)
+              network = builder.create_network(0)
+              x = network.add_input("x", trt.float32, (1, 16))
+              network.mark_output(network.add_identity(x).get_output(0))
+              engine = builder.build_serialized_network(network, builder.create_builder_config())
+              assert engine is not None, "TensorRT could not build an engine"
+              print("PASS: engine built,", engine.nbytes, "bytes")
+          resources:
+            limits:
+              nvidia.com/gpu: 1

@@ -96,3 +96,47 @@ With a `group_vars/all/` directory present, Ansible reads that and not
 | Node agent | `journalctl -u nvke-agent` on the node |
 | SPIRE agent | `journalctl -u spire-agent`, `journalctl -u nvke-spire-configure` on the node |
 | BGP | `journalctl -u frr`, `vtysh -c 'show bgp summary'` on the BGP peer |
+
+## The VMs have no internet access
+
+The bootstrap VM cannot reach GitHub or the Ubuntu archive, while the host
+can. Check libvirt's NAT rules for the network:
+
+```shell
+sudo iptables -S | grep LIBVIRT_FWO
+sudo iptables -t nat -S | grep LIBVIRT_PRT
+```
+
+Rules with `-o <interface>` accept and masquerade only traffic leaving through
+that interface. A network defined with `<forward dev='eno1' mode='nat'>` on a
+host whose address and default route sit on a bridge with `eno1` as a port
+(`br1`) rejects everything: traffic leaves through the bridge, not `eno1`.
+Point the forward device at the interface of the default route, or drop it
+(`<forward mode='nat'/>`, any interface), with `virsh net-edit default`, then
+`virsh net-destroy default && virsh net-start default` while no VM uses it.
+
+## A GPU node VM does not start
+
+`virsh start` fails with a message about the PCI device. The VM gets the GPU
+with `managed='no'`, so libvirt never takes it from a host driver: vfio-pci
+must own it from boot. `lspci -nnk -s 01:00` on the host must say
+`Kernel driver in use: vfio-pci` for every function; if it does not, run
+`playbooks/gpu_passthrough.yml` and reboot the host.
+
+## The GPU Operator never gets ready
+
+`kubectl get clusterpolicy` stays `notReady`. Look at the driver pod on the GPU
+node first:
+
+```shell
+kubectl -n gpu-operator get pods -o wide
+kubectl -n gpu-operator logs -l app=nvidia-driver-daemonset -c nvidia-driver-ctr --tail=50
+```
+
+The driver container builds the module for the node's kernel, so the node
+needs the Ubuntu archive, and a driver image for the node's Ubuntu release
+must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04`). If containerd
+keeps restarting on the node after the toolkit starts, the toolkit wrote a
+config drop-in at the wrong version: the role sets `RUNTIME_CONFIG_SOURCE=file`
+for that.
+

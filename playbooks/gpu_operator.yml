@@ -1,0 +1,19 @@
+---
+# The NVIDIA GPU Operator on the NVKE cluster, from the bootstrap host (it
+# has helm, kubectl and the admin kubeconfig). Runs when nvke_gpu_operator is
+# true; the KVM inventory turns it on with a GPU passed through.
+#
+#   ansible-playbook -i inventory.yml omerfsen.nvke.gpu_operator -e nvke_gpu_operator=true
+
+- name: NVIDIA GPU Operator
+  hosts: nvke_bootstrap[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: GPU Operator, then a CUDA pod on a GPU
+      ansible.builtin.include_role:
+        name: omerfsen.nvke.gpu_operator
+      vars:
+        gpu_operator_kubeconfig: >-
+          {{ nvke_workdir | default('/var/lib/nvke') }}/{{ nvke_cluster_name | default('nvke-mgmt') }}/{{ nvke_cluster_name | default('nvke-mgmt') }}.kubeconfig
+      when: nvke_gpu_operator | default(false) | bool
