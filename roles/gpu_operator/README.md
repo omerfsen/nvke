@@ -18,6 +18,10 @@ and installs the container toolkit and the device plugin.
 Runs on a host with helm, kubectl and the cluster's admin kubeconfig: the
 NVKE bootstrap host has all three.
 
+The CUDA pod runs on every run and needs a free GPU: on a cluster whose GPUs
+are all taken it waits up to ten minutes and fails. Set
+`gpu_operator_smoke_test: false` there.
+
 ```yaml
 - hosts: nvke_bootstrap[0]
   become: true

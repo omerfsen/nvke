@@ -85,7 +85,7 @@ nvke_kvm_vms: >-
   {{ vms }}
 
 # ── GPUs ─────────────────────────────────────────────────────────────────
-# PCI functions of this hypervisor's GPU, bound to vfio-pci for a GPU node VM
+# PCI functions of the first hypervisor's GPU, bound to vfio-pci for a GPU node VM
 # (omerfsen.nvke.gpu_passthrough), e.g. ["0000:01:00.0", "0000:01:00.1"]:
 # the GPU and everything in its IOMMU group. Empty: no GPU passthrough.
 nvke_kvm_gpu_devices: []

@@ -269,4 +269,6 @@ kubeconfig. The cluster's credentials directory (`~/.nvke/nvke-mgmt`) is
 renamed to `~/.nvke/nvke-mgmt.destroyed-<time>`, not deleted: it holds the
 only off-node copy of the etcd encryption key. The node image, the downloads
 and the SSH keys stay, so the next run builds nothing; FRR stays configured
-and simply has no sessions.
+and simply has no sessions. A GPU stays on vfio-pci: give it back to the host with
+`nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
+reboot.
