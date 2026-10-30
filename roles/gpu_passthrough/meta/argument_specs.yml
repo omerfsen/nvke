@@ -1,0 +1,27 @@
+---
+argument_specs:
+  main:
+    short_description: Bind GPUs to vfio-pci at boot so KVM VMs can own them.
+    description:
+      - Checks that the IOMMU is on and that each device's IOMMU group holds nothing but the listed devices.
+      - In C(permanent) mode keeps the host NVIDIA and nouveau drivers from loading, binds the devices to vfio-pci
+      - from the initrd, and fails until the host has been rebooted onto that binding. In C(off) mode removes
+      - that configuration again; the host driver takes the devices back after a reboot.
+      - Never reboots the host and never detaches a device from a running driver (a live detach can freeze a host).
+      - Never edits the bootloader.
+    author: Omer Sen
+    options:
+      gpu_passthrough_devices:
+        type: list
+        elements: str
+        required: true
+        description:
+          - PCI functions to hand over, in full C(DDDD:BB:DD.F) form, for example C(0000:01:00.0) and C(0000:01:00.1).
+          - Every function in the GPU's IOMMU group must be listed.
+      gpu_passthrough_mode:
+        type: str
+        default: permanent
+        choices:
+          - permanent
+          - "off"
+        description: C(permanent) gives the devices to vfio-pci from boot; C(off) gives them back to the host.

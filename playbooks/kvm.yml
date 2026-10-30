@@ -7,6 +7,9 @@
 #
 #   ansible-playbook -i inventory/kvm omerfsen.nvke.kvm
 
+- name: GPU passthrough
+  ansible.builtin.import_playbook: gpu_passthrough.yml
+
 - name: Node image
   ansible.builtin.import_playbook: image.yml
 

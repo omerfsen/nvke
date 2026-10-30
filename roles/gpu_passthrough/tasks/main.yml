@@ -1,0 +1,70 @@
+---
+# GPUs for KVM VMs, bound to vfio-pci from boot. Every check fails the play
+# instead of warning: a half-configured passthrough gives a VM that boots
+# fine and has no usable GPU.
+
+- name: Devices and mode are valid
+  ansible.builtin.assert:
+    that:
+      - gpu_passthrough_devices | length > 0
+      - gpu_passthrough_devices | reject('match', '^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$') | list | length == 0
+      - gpu_passthrough_mode in ['permanent', 'off']
+    fail_msg: >-
+      Set gpu_passthrough_devices to full PCI addresses like 0000:01:00.0
+      (lspci -D) and gpu_passthrough_mode to permanent or off.
+    quiet: true
+
+- name: Read each device's vendor:device id and current driver
+  ansible.builtin.shell: |
+    set -o pipefail
+    d=/sys/bus/pci/devices/{{ item }}
+    test -e "$d" || { echo "no such PCI device" >&2; exit 1; }
+    echo "$(sed 's/^0x//' "$d/vendor"):$(sed 's/^0x//' "$d/device")"
+    if [ -e "$d/driver" ]; then basename "$(readlink -f "$d/driver")"; else echo none; fi
+    basename "$(readlink -f "$d/iommu_group")"
+  args:
+    executable: /bin/bash
+  loop: "{{ gpu_passthrough_devices }}"
+  register: gpu_passthrough_state
+  changed_when: false
+  check_mode: false
+
+- name: The IOMMU is on
+  ansible.builtin.assert:
+    that: >-
+      gpu_passthrough_state.results | map(attribute='stdout_lines') | map('last')
+      | select('match', '^[0-9]+$') | list | length == gpu_passthrough_devices | length
+    fail_msg: >-
+      A device has no IOMMU group, so the IOMMU is off. Turn on VT-d or
+      AMD-Vi (IOMMU) in the firmware; on Intel also add intel_iommu=on to the
+      kernel command line. This role does not edit the bootloader.
+    quiet: true
+
+- name: List every device in those IOMMU groups
+  ansible.builtin.find:
+    paths: "/sys/kernel/iommu_groups/{{ item }}/devices"
+    file_type: any
+  loop: "{{ gpu_passthrough_state.results | map(attribute='stdout_lines') | map('last') | unique | list }}"
+  register: gpu_passthrough_groups
+
+# A VM can only own a whole IOMMU group.
+- name: Each IOMMU group holds only the listed devices
+  ansible.builtin.assert:
+    that: item.files | map(attribute='path') | map('basename') | difference(gpu_passthrough_devices) | length == 0
+    fail_msg: >-
+      IOMMU group {{ item.item }} also holds
+      {{ item.files | map(attribute='path') | map('basename') | difference(gpu_passthrough_devices) | join(', ') }}.
+      List those devices too if the VM may own them, or move the GPU to a slot
+      in a group of its own.
+    quiet: true
+  loop: "{{ gpu_passthrough_groups.results }}"
+  loop_control:
+    label: "group {{ item.item }}"
+
+- name: Hand the devices to vfio-pci from boot
+  ansible.builtin.include_tasks: permanent.yml
+  when: gpu_passthrough_mode == 'permanent'
+
+- name: Give the devices back to the host
+  ansible.builtin.include_tasks: "off.yml"
+  when: gpu_passthrough_mode == 'off'

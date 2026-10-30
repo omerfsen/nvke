@@ -1,0 +1,21 @@
+---
+# Remove the vfio-pci binding. Nothing is unbound live: a device on vfio-pci
+# returns to the host driver after the next reboot.
+
+- name: Remove the vfio-pci binding
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/modprobe.d/blacklist-gpu-passthrough.conf
+    - /etc/modprobe.d/vfio.conf
+    - /etc/modules-load.d/vfio-pci.conf
+  notify: Rebuild the initrd
+
+- name: Report a reboot that is still owed
+  ansible.builtin.debug:
+    msg: "{{ item.item }} is still on vfio-pci; reboot the host to give it back to the host driver."
+  loop: "{{ gpu_passthrough_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout_lines[1] == 'vfio-pci'

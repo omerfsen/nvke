@@ -224,3 +224,49 @@ the hosts. All 24 pods Running; the kubeconfig on the controller points at
   commands), and the collection has no dependencies left. Importer: completed
   with no warnings.
 - Full `kvm.yml` rerun after those changes: `changed=0` on all five hosts.
+
+## 2026-10-30: GPU nodes, on a KVM host with one GPU
+
+### The host
+
+Ubuntu 24.04.5, kernel 6.8.0-147, AMD Ryzen 9 9900X (12 cores, 24
+threads, AMD-V), 92 GiB RAM, 270 GiB free on `/`. One GPU, a GeForce RTX 4080
+SUPER (`10de:2702`, 16 GiB) at `01:00.0` with its HDMI audio (`10de:22bb`) at
+`01:00.1`, both alone in IOMMU group 13 (the IOMMU is on by default on this
+AMD board, no kernel parameter). The GPU is also the firmware's boot display;
+an AMD iGPU (`12:00.0`) drives the console. Secure Boot is on, and the host
+runs Canonical's signed NVIDIA 615 modules. libvirt's `default` network here
+is 192.168.90.0/24, so `local.yml` moves the VMs there.
+
+### Does a GPU node need passthrough?
+
+Yes. The docs (*Build and verify your own node image*): the node image "is
+not a ready Kubernetes node: `nvke-agent` installs Kubernetes later, and the
+NVIDIA GPU Operator installs GPU drivers". A GPU node boots the NVKE node
+image like every other node, so the host's own driver is of no use, and on a
+KVM host the GPU node is a VM that owns the GPU through VFIO.
+
+In NVKE's design GPU nodes are workload-cluster nodes that NICo (NVIDIA
+Infra Controller, the bare-metal provisioner behind CAPNICo) provisions. There
+is no NICo here, and the docs' mock-NICo starts workload nodes as Docker
+containers, which cannot hold a passed-through GPU. So the GPU goes to a
+management-cluster node VM.
+
+### Binding the GPU to vfio-pci
+
+`omerfsen.nvke.gpu_passthrough` follows the passthrough that already ran on
+this host for another project: permanent mode only (a live detach of this
+card from the host driver once froze the host), the host NVIDIA modules
+refused with `install <module> /bin/false` (a plain blacklist leaves the
+NVIDIA udev rule reloading them in a loop), vfio-pci ids plus softdeps, the
+initrd rebuilt, and a gate that stops the play until the host has been
+rebooted onto vfio-pci. The first run stops there, as designed:
+
+```text
+TASK [omerfsen.nvke.gpu_passthrough : Every device is on vfio-pci]
+failed: [localhost] (item=0000:01:00.0)   # still on nvidia: reboot first
+```
+
+The lint venv failed first: `python3` on this host's PATH is Python 3.15,
+which ansible-core 2.16 does not support (`ImportError: cannot import name
+'_MISSING_TYPE'`). `make dev PYTHON=<python3.12>` picks the interpreter.

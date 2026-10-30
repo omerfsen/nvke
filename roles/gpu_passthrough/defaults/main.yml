@@ -1,0 +1,8 @@
+---
+# PCI functions handed to VMs, in full DDDD:BB:DD.F form: the GPU and every
+# other function in its IOMMU group (on consumer cards, its HDMI audio).
+gpu_passthrough_devices: []
+# permanent: vfio-pci owns the devices from boot and the host never drives
+# them (one reboot to switch). off: the host driver takes them back after a
+# reboot.
+gpu_passthrough_mode: permanent

@@ -82,6 +82,15 @@ nvke_kvm_vms: >-
   {%- endfor -%}
   {{ vms }}
 
+# ── GPUs ─────────────────────────────────────────────────────────────────
+# PCI functions of this hypervisor's GPU, bound to vfio-pci for a GPU node VM
+# (omerfsen.nvke.gpu_passthrough), e.g. ["0000:01:00.0", "0000:01:00.1"]:
+# the GPU and everything in its IOMMU group. Empty: no GPU passthrough.
+nvke_kvm_gpu_devices: []
+# permanent: vfio-pci owns them from boot; off: give them back to the host.
+# Either takes effect after a reboot of the hypervisor.
+nvke_kvm_gpu_passthrough_mode: permanent
+
 # ── Cluster (role omerfsen.nvke.nvke) ────────────────────────────────────
 nvke_cluster_name: nvke-mgmt
 # The VMs are small next to NVKE's server-sized 16Gi default.
