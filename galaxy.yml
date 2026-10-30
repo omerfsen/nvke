@@ -27,6 +27,7 @@ repository: https://github.com/omerfsen/nvke
 documentation: https://github.com/omerfsen/nvke/blob/main/README.md
 issues: https://github.com/omerfsen/nvke/issues
 build_ignore:
+  - tests
   - "*.qcow2"
   - "*.img"
   - "*.iso"

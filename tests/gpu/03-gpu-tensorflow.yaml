@@ -1,0 +1,43 @@
+# TensorFlow on the GPU, including cuDNN (conv2d).
+#
+# The tensorflow/tensorflow:2.21.0-gpu image is built against cuDNN 9 but
+# ships cuDNN 8.9.6, so cuDNN fails to load and TensorFlow silently falls back
+# to the CPU. Installing cuDNN 9 from pip fixes it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-tensorflow
+  namespace: nvke-gpu-tests
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: docker.io/tensorflow/tensorflow:2.21.0-gpu@sha256:61fe1ce25bd26b0a38e310463a5588d4067d2d01b6bdb058a3ca4f5cf2e18f15
+          env:
+            - name: TF_CPP_MIN_LOG_LEVEL
+              value: "2"
+          command: [bash, -c]
+          args:
+            - |
+              set -e
+              pip install -q --no-cache-dir --root-user-action=ignore nvidia-cudnn-cu12==9.27.0.42
+              python3 - <<'PY'
+              import tensorflow as tf
+              gpus = tf.config.list_physical_devices("GPU")
+              assert gpus, "TensorFlow sees no GPU"
+              info = tf.sysconfig.get_build_info()
+              print("TensorFlow", tf.__version__, "| CUDA", info["cuda_version"], "| cuDNN", info["cudnn_version"])
+              with tf.device("/GPU:0"):
+                  x = tf.random.normal([8, 128, 128, 3])
+                  k = tf.random.normal([3, 3, 3, 16])
+                  y = tf.nn.conv2d(x, k, 1, "SAME")
+                  z = tf.matmul(tf.random.normal([1024, 1024]), tf.random.normal([1024, 1024]))
+              assert "GPU" in y.device and "GPU" in z.device
+              print("PASS: conv2d", y.shape, "and matmul ran on", y.device)
+              PY
+          resources:
+            limits:
+              nvidia.com/gpu: 1

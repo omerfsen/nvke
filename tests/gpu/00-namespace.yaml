@@ -1,0 +1,7 @@
+# The tests run as root but unprivileged: the baseline Pod Security level.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nvke-gpu-tests
+  labels:
+    pod-security.kubernetes.io/enforce: baseline

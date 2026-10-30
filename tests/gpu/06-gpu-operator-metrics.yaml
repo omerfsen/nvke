@@ -1,0 +1,26 @@
+# The GPU Operator's DCGM exporter publishes GPU metrics. Checks it answers
+# and reports this GPU's temperature.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-operator-metrics
+  namespace: nvke-gpu-tests
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: docker.io/curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+          command: [sh, -c]
+          args:
+            - |
+              set -e
+              m=$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors \
+                    http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metrics)
+              line=$(echo "$m" | grep '^DCGM_FI_DEV_GPU_TEMP{' | head -1)
+              [ -n "$line" ] || { echo "FAIL: no DCGM_FI_DEV_GPU_TEMP metric"; exit 1; }
+              echo "$line" | grep -o 'modelName="[^"]*"'
+              echo "temperature: ${line##* } C"
+              echo "PASS: $(echo "$m" | grep -c '^DCGM_FI_') DCGM samples exported"

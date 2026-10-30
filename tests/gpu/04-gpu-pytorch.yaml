@@ -1,0 +1,30 @@
+# PyTorch on the GPU: CUDA, cuDNN (conv2d) and a matmul.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-pytorch
+  namespace: nvke-gpu-tests
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: docker.io/pytorch/pytorch:2.14.1-cuda13.2-cudnn9-runtime@sha256:c4ab67f95221a342dff0e8ca4543a7b8885f79f7a0029c0e2e39685d5eaf1722
+          command: [python3, -c]
+          args:
+            - |
+              import torch
+              assert torch.cuda.is_available(), "PyTorch sees no GPU"
+              print("PyTorch", torch.__version__, "| CUDA", torch.version.cuda,
+                    "| cuDNN", torch.backends.cudnn.version(), "|", torch.cuda.get_device_name(0))
+              x = torch.randn(8, 3, 128, 128, device="cuda")
+              y = torch.nn.functional.conv2d(x, torch.randn(16, 3, 3, 3, device="cuda"), padding=1)
+              z = torch.randn(1024, 1024, device="cuda") @ torch.randn(1024, 1024, device="cuda")
+              torch.cuda.synchronize()
+              assert y.is_cuda and z.is_cuda
+              print("PASS: conv2d", tuple(y.shape), "and matmul ran on", y.device)
+          resources:
+            limits:
+              nvidia.com/gpu: 1
