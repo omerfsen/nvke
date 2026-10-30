@@ -1,0 +1,18 @@
+# .github/cicd/config - this repo's settings for the pipelines vendored from
+# https://github.com/omerfsen/cicd. Plain KEY=value lines, read by the
+# workflows from main (so a PR cannot change them for itself).
+
+# release-please comes later: no release before the GPU work is tested.
+PIPELINES=pr-title ansible-galaxy
+
+PR_TITLE_ENABLED=true
+PR_TITLE_RUNNER=ubuntu-24.04
+
+# ansible-galaxy: lint, importer and build on every PR and push to main;
+# publish to Galaxy only from a vX.Y.Z tag that matches galaxy.yml.
+ANSIBLE_GALAXY_ENABLED=true
+ANSIBLE_GALAXY_RUNNER=ubuntu-24.04
+ANSIBLE_GALAXY_PATH=.
+ANSIBLE_GALAXY_LINT_PROFILE=production
+ANSIBLE_GALAXY_PUBLISH=true
+ANSIBLE_GALAXY_ENVIRONMENT=galaxy
