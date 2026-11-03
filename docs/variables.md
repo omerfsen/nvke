@@ -45,6 +45,7 @@ Prepare one management-cluster node built from the NVKE node image.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
+| `nvke_node_sysctls` | dict | `{'fs.inotify.max_user_instances': 8192, 'fs.inotify.max_user_watches': 524288}` | Kernel settings written to `/etc/sysctl.d/90-nvke-node.conf` and applied at once. The default raises the inotify limits; Ubuntu's 128 instances per user run out on a node with the control plane and GPU workloads, and the GPU device plugin crash-loops. |
 | `nvke_spire_trust_bundle` | str |  | **Required.** The SPIRE CA certificate, PEM. Set by the playbooks from the bootstrap host. |
 | `nvke_bootstrap_ip` | str |  | Address the nodes reach the bootstrap host at (SPIRE, TCP 30081). Default the bootstrap host's `nvke_node_ip` or `ansible_host`. (also in an earlier entry point) |
 | `nvke_trust_domain` | str |  | SPIFFE trust domain of the site. Default `<cluster>.nvke.internal`. (also in an earlier entry point) |

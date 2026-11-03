@@ -34,6 +34,17 @@
   changed_when: false
   failed_when: "'status: done' not in nvke_cloud_init.stdout"
 
+# ── Kernel settings ──────────────────────────────────────────────────────
+- name: Kernel settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-nvke-node.conf
+    mode: "0644"
+    content: |
+      {% for key, value in nvke_node_sysctls | dictsort %}
+      {{ key }} = {{ value }}
+      {% endfor %}
+  notify: Apply the node kernel settings
+
 # ── SPIRE: the bootstrap's server and the site's CA ──────────────────────
 - name: SPIRE input directory
   ansible.builtin.file:

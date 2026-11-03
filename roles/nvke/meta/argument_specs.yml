@@ -124,9 +124,19 @@ argument_specs:
       - Points the node's SPIRE agent at the bootstrap host with the site's trust domain and trust bundle,
       - and restarts the agents when that changes.
       - Installs the Kubernetes and OVN-Kubernetes packages the image stages,
+      - sets the kernel settings in O(nvke_node_sysctls),
       - and reads the TPM endorsement key thumbprint into C(nvke_tpm_ek_thumbprint).
     author: Omer Sen
     options:
+      nvke_node_sysctls:
+        type: dict
+        default:
+          fs.inotify.max_user_instances: 8192
+          fs.inotify.max_user_watches: 524288
+        description:
+          - Kernel settings written to C(/etc/sysctl.d/90-nvke-node.conf) and applied at once.
+          - The default raises the inotify limits; Ubuntu's 128 instances per user run out on a node with the
+          - control plane and GPU workloads, and the GPU device plugin crash-loops.
       nvke_spire_trust_bundle:
         type: str
         required: true
