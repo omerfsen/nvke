@@ -44,6 +44,15 @@ nvke_spire_ca_cert_file: ""
 nvke_spire_ca_key_file: ""
 nvke_spire_ca_days: 3650
 
+# Kernel settings on every node (node entry point), in
+# /etc/sysctl.d/90-nvke-node.conf. Ubuntu's default of 128 inotify instances
+# per user runs out on a node that runs the control plane and GPU workloads:
+# the GPU device plugin then crash-loops with "couldn't initialize inotify:
+# too many open files".
+nvke_node_sysctls:
+  fs.inotify.max_user_instances: 8192
+  fs.inotify.max_user_watches: 524288
+
 # ── Hosts ────────────────────────────────────────────────────────────────
 # Address the nodes reach the bootstrap host at (SPIRE, TCP 30081).
 nvke_bootstrap_ip: "{{ hostvars[groups['nvke_bootstrap'][0]].nvke_node_ip
