@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/omerfsen/nvke/compare/v0.1.0...v0.2.0) (2026-11-03)
+
+
+### Features
+
+* **nvke:** raise the inotify limits on every node ([#5](https://github.com/omerfsen/nvke/issues/5)) ([3869f8d](https://github.com/omerfsen/nvke/commit/3869f8d5e083f07cc542d28fc1f899e742bb5e1a))
+* **nvke:** raise the inotify limits on every node ([#5](https://github.com/omerfsen/nvke/issues/5)) ([3869f8d](https://github.com/omerfsen/nvke/commit/3869f8d5e083f07cc542d28fc1f899e742bb5e1a))
+
 ## 0.1.0 (2026-10-30)
 
 
