@@ -8,6 +8,9 @@ node_image_nvke_repo: https://github.com/dsx-ai-factory/nvke.git
 # What to build. The non-FDE variant is the one the bootstrap documents; FDE
 # images share one disk key across every node and are for evaluation only.
 node_image_variant: non-fde
+# A prebuilt node image (qcow2) already on the KVM host, for example built by
+# NVKR. Set, the role uses it as is and builds nothing.
+node_image_file: ""
 node_image_ubuntu_release: 26.04.1
 
 # Working directory for the checkout, toolchain, ISO cache and Go caches

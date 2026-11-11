@@ -19,6 +19,29 @@ argument_specs:
         type: str
         default: 400c24fb6465b042be883d6b62472528520d6291
         description: Commit the tag must resolve to.
+      nvke_nvkectl_file:
+        type: path
+        default: ""
+        description: A prebuilt nvkectl on the Ansible controller, for example from NVKR. Empty builds it from the pinned release.
+      nvke_controller_image_archive:
+        type: path
+        default: ""
+        description:
+          - A prebuilt controller image as an OCI archive on the Ansible controller, loaded with C(nerdctl load).
+          - Its one image is named O(nvke_controller_image).
+          - Set with O(nvke_provisioned_image_archive), or neither. Empty builds both images from the pinned release.
+      nvke_provisioned_image_archive:
+        type: path
+        default: ""
+        description: A prebuilt provisioned-provider image as an OCI archive, named O(nvke_provisioned_image). See O(nvke_controller_image_archive).
+      nvke_controller_image:
+        type: str
+        default: nke-controller:{{ nvke_version }}
+        description: Reference of the controller image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as.
+      nvke_provisioned_image:
+        type: str
+        default: cluster-api-provider-provisioned:{{ nvke_version }}
+        description: Reference of the provisioned-provider image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as.
       nvke_repo:
         type: str
         default: https://github.com/dsx-ai-factory/nvke.git
@@ -173,6 +196,14 @@ argument_specs:
         type: str
         default: v0.22.0
         description: NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from.
+      nvke_controller_image:
+        type: str
+        default: nke-controller:{{ nvke_version }}
+        description: Reference of the controller image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as.
+      nvke_provisioned_image:
+        type: str
+        default: cluster-api-provider-provisioned:{{ nvke_version }}
+        description: Reference of the provisioned-provider image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as.
       nvke_cluster_name:
         type: str
         default: nvke-mgmt

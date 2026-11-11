@@ -22,6 +22,10 @@ argument_specs:
         type: str
         default: https://github.com/dsx-ai-factory/nvke.git
         description: NVKE Git repository.
+      node_image_file:
+        type: path
+        default: ""
+        description: A prebuilt node image (qcow2) already on the KVM host, for example built by NVKR. Set, the role uses it as is and builds nothing.
       node_image_variant:
         type: str
         default: non-fde

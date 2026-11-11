@@ -13,6 +13,11 @@ Prepare the bootstrap host: runtime, tools, nvkectl, seed-cluster images and the
 |---|---|---|---|
 | `nvke_version` | str | `v0.22.0` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. |
 | `nvke_commit` | str | `400c24fb6465b042be883d6b62472528520d6291` | Commit the tag must resolve to. |
+| `nvke_nvkectl_file` | path | `""` | A prebuilt nvkectl on the Ansible controller, for example from NVKR. Empty builds it from the pinned release. |
+| `nvke_controller_image_archive` | path | `""` | A prebuilt controller image as an OCI archive on the Ansible controller, loaded with `nerdctl load`. Its one image is named `nvke_controller_image`. Set with `nvke_provisioned_image_archive`, or neither. Empty builds both images from the pinned release. |
+| `nvke_provisioned_image_archive` | path | `""` | A prebuilt provisioned-provider image as an OCI archive, named `nvke_provisioned_image`. See `nvke_controller_image_archive`. |
+| `nvke_controller_image` | str | `nke-controller:{{ nvke_version }}` | Reference of the controller image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. |
+| `nvke_provisioned_image` | str | `cluster-api-provider-provisioned:{{ nvke_version }}` | Reference of the provisioned-provider image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. |
 | `nvke_repo` | str | `https://github.com/dsx-ai-factory/nvke.git` | NVKE Git repository. |
 | `nvke_cluster_name` | str | `nvke-mgmt` | Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory. |
 | `nvke_workdir` | path | `/var/lib/nvke` | Working directory on the bootstrap host: downloads, checkout, Go, and one directory per cluster. |
@@ -60,6 +65,8 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `nvke_version` | str | `v0.22.0` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. (also in an earlier entry point) |
+| `nvke_controller_image` | str | `nke-controller:{{ nvke_version }}` | Reference of the controller image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. (also in an earlier entry point) |
+| `nvke_provisioned_image` | str | `cluster-api-provider-provisioned:{{ nvke_version }}` | Reference of the provisioned-provider image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. (also in an earlier entry point) |
 | `nvke_cluster_name` | str | `nvke-mgmt` | Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory. (also in an earlier entry point) |
 | `nvke_site_nodes` | list |  | The nodes as `name`, `ip` and `tpm`. Default built from the `nvke_nodes` group (`nvke_node_name`, `nvke_node_ip` or `ansible_host`, and the thumbprint the node entry point read). (also in an earlier entry point) |
 | `nvke_k8s_version` | str | `1.36.3` | Kubernetes version without a leading `v`. The node image must stage it; NVKE supports `1.36.3`. (also in an earlier entry point) |
@@ -87,6 +94,7 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | `node_image_nvke_version` | str | `v0.22.0` | NVKE release tag to build from. |
 | `node_image_nvke_commit` | str | `400c24fb6465b042be883d6b62472528520d6291` | Commit the tag must resolve to. |
 | `node_image_nvke_repo` | str | `https://github.com/dsx-ai-factory/nvke.git` | NVKE Git repository. |
+| `node_image_file` | path | `""` | A prebuilt node image (qcow2) already on the KVM host, for example built by NVKR. Set, the role uses it as is and builds nothing. |
 | `node_image_variant` | str | `non-fde` | Image variant. FDE images share one disk key across all nodes and are for evaluation only. |
 | `node_image_ubuntu_release` | str | `26.04.1` | Ubuntu point release to install (`26.04.1` or `24.04.5`). |
 | `node_image_build_dir` | path | `/var/lib/nvke-build` | Checkout, toolchain, ISO and Go caches; about 40 GiB at peak. |
