@@ -26,11 +26,24 @@
       {{ node_image_dest_dir }}/nvke-node-{{ node_image_variant }}-ubuntu-{{ node_image_ubuntu_release
       }}-{{ node_image_arch }}-{{ node_image_nvke_version }}.qcow2
 
+- name: Use the prebuilt image
+  ansible.builtin.set_fact:
+    node_image_path: "{{ node_image_file }}"
+  when: node_image_file | length > 0
+
 - name: Is the image already built?
   ansible.builtin.stat:
     path: "{{ node_image_path }}"
     get_checksum: false
+    follow: true
   register: node_image_stat
+
+- name: The prebuilt image exists
+  ansible.builtin.assert:
+    that: node_image_stat.stat.exists and node_image_stat.stat.isreg
+    fail_msg: node_image_file {{ node_image_file }} is not a file on this host.
+    quiet: true
+  when: node_image_file | length > 0
 
 - name: Build the image
   when: not node_image_stat.stat.exists

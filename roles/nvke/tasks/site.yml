@@ -11,8 +11,6 @@
     nvke_site_dir: "{{ nvke_workdir }}/{{ nvke_cluster_name }}"
     nvke_site_kubeconfig: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/{{ nvke_cluster_name }}.kubeconfig"
     nvke_site_key: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/{{ nvke_cluster_name }}-etcd-encryption-key.json"
-    nvke_controller_image: nke-controller:{{ nvke_version }}
-    nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
 
 - name: The site is valid
   ansible.builtin.assert:
@@ -66,7 +64,8 @@
         chdir: "{{ nvke_site_dir }}"
       vars:
         nvke_sitespec_sets: >-
-          {{ ['cluster.k8sVersion=' ~ nvke_k8s_version]
+          {{ ['cluster.k8sVersion=' ~ nvke_k8s_version,
+              'cluster.cniVersion=' ~ nvke_cni_version]
              + (['cluster.controlPlaneVIP=' ~ nvke_vip] if nvke_vip | length > 0 else [])
              + ['cluster.podCidr=' ~ nvke_pod_cidr,
                 'cluster.serviceCidr=' ~ nvke_service_cidr,

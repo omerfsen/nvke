@@ -9,8 +9,13 @@
     nvke_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('unsupported') }}"
     nvke_src: "{{ nvke_workdir }}/src/nvke-{{ nvke_version }}"
     nvke_site_dir: "{{ nvke_workdir }}/{{ nvke_cluster_name }}"
-    nvke_controller_image: nke-controller:{{ nvke_version }}
-    nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
+    nvke_prebuilt_images: "{{ nvke_controller_image_archive | length > 0 }}"
+
+- name: Prebuilt seed-cluster images come as a pair
+  ansible.builtin.assert:
+    that: (nvke_controller_image_archive | length > 0) == (nvke_provisioned_image_archive | length > 0)
+    fail_msg: Set both nvke_controller_image_archive and nvke_provisioned_image_archive, or neither.
+    quiet: true
 
 - name: The bootstrap host is supported
   ansible.builtin.assert:
@@ -244,19 +249,24 @@
     - /run/buildkit-nerdctl/buildkitd.sock
 
 # ── nvkectl and the seed-cluster images, from the pinned release ─────────
+# Or prebuilt (nvke_nvkectl_file, nvke_*_image_archive); the checkout is only
+# needed for what is built here.
 - name: Check out the pinned NVKE release
-  ansible.builtin.git:
-    repo: "{{ nvke_repo }}"
-    dest: "{{ nvke_src }}"
-    version: "{{ nvke_version }}"
-    force: false
-  register: nvke_git
+  when: nvke_nvkectl_file | length == 0 or not nvke_prebuilt_images
+  block:
+    - name: Check out the pinned NVKE release
+      ansible.builtin.git:
+        repo: "{{ nvke_repo }}"
+        dest: "{{ nvke_src }}"
+        version: "{{ nvke_version }}"
+        force: false
+      register: nvke_git
 
-- name: The tag resolves to the pinned commit
-  ansible.builtin.assert:
-    that: nvke_git.after == nvke_commit
-    fail_msg: "{{ nvke_version }} resolves to {{ nvke_git.after }}, not {{ nvke_commit }}. Check the tag before building from it."
-    quiet: true
+    - name: The tag resolves to the pinned commit
+      ansible.builtin.assert:
+        that: nvke_git.after == nvke_commit
+        fail_msg: "{{ nvke_version }} resolves to {{ nvke_git.after }}, not {{ nvke_commit }}. Check the tag before building from it."
+        quiet: true
 
 - name: Build nvkectl
   ansible.builtin.command:
@@ -264,6 +274,7 @@
     chdir: "{{ nvke_src }}"
     creates: "{{ nvke_src }}/cli/bin/nvkectl"
   environment: "{{ nvke_build_env }}"
+  when: nvke_nvkectl_file | length == 0
 
 - name: Put nvkectl on PATH
   ansible.builtin.file:
@@ -271,6 +282,40 @@
     dest: /usr/local/bin/nvkectl
     state: link
     force: true
+  when: nvke_nvkectl_file | length == 0
+
+- name: The prebuilt nvkectl exists on the controller
+  ansible.builtin.stat:
+    path: "{{ nvke_nvkectl_file }}"
+  delegate_to: localhost
+  become: false
+  register: nvke_nvkectl_src
+  failed_when: not (nvke_nvkectl_src.stat.exists and nvke_nvkectl_src.stat.isreg)
+  when: nvke_nvkectl_file | length > 0
+
+- name: Is /usr/local/bin/nvkectl a link to a source build?
+  ansible.builtin.stat:
+    path: /usr/local/bin/nvkectl
+    get_checksum: false
+  register: nvke_nvkectl_on_path
+  when: nvke_nvkectl_file | length > 0
+
+- name: Remove the link to a source-built nvkectl
+  ansible.builtin.file:
+    path: /usr/local/bin/nvkectl
+    state: absent
+  when:
+    - nvke_nvkectl_file | length > 0
+    - nvke_nvkectl_on_path.stat.islnk | default(false)
+
+- name: Install the prebuilt nvkectl
+  ansible.builtin.copy:
+    src: "{{ nvke_nvkectl_file }}"
+    dest: /usr/local/bin/nvkectl
+    owner: root
+    group: root
+    mode: "0755"
+  when: nvke_nvkectl_file | length > 0
 
 - name: Which seed-cluster images are built?
   ansible.builtin.command: nerdctl image inspect {{ nvke_controller_image }} {{ nvke_provisioned_image }}
@@ -288,8 +333,43 @@
       CAPI_PROVISIONED_IMAGE={{ nvke_provisioned_image }}
     chdir: "{{ nvke_src }}"
   environment: "{{ nvke_build_env }}"
-  when: nvke_images_present.rc != 0
+  when:
+    - nvke_images_present.rc != 0
+    - not nvke_prebuilt_images
   changed_when: true
+
+# Always copied (idempotent by checksum) and loaded whenever a copy changed:
+# an image already under the same reference, built from source or from an
+# older archive, must not hide the archive. Fixed names, so two archives
+# with the same file name cannot overwrite each other.
+- name: Copy the prebuilt seed-cluster image archives
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ nvke_workdir }}/images/{{ item.name }}.oci.tar"
+    mode: "0644"
+  loop:
+    - {name: controller, src: "{{ nvke_controller_image_archive }}"}
+    - {name: provisioned-provider, src: "{{ nvke_provisioned_image_archive }}"}
+  loop_control: {label: "{{ item.name }}"}
+  register: nvke_prebuilt_copied
+  when: nvke_prebuilt_images
+
+- name: Load the prebuilt seed-cluster images
+  ansible.builtin.command: nerdctl load --input {{ item.dest }}
+  loop: "{{ nvke_prebuilt_copied.results | default([]) }}"
+  loop_control: {label: "{{ item.item.name | default('') }}"}
+  environment: "{{ nvke_build_env }}"
+  when:
+    - nvke_prebuilt_images
+    - item.changed or nvke_images_present.rc != 0
+  changed_when: true
+
+- name: The prebuilt images loaded under their references
+  ansible.builtin.command: nerdctl image inspect {{ nvke_controller_image }} {{ nvke_provisioned_image }}
+  environment: "{{ nvke_build_env }}"
+  changed_when: false
+  check_mode: false
+  when: nvke_prebuilt_images
 
 # ── SPIRE CA ─────────────────────────────────────────────────────────────
 - name: Copy your SPIRE CA

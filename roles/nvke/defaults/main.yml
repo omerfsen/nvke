@@ -7,6 +7,18 @@ nvke_version: v0.22.0
 nvke_commit: 400c24fb6465b042be883d6b62472528520d6291
 nvke_repo: https://github.com/dsx-ai-factory/nvke.git
 
+# ── Prebuilt nvkectl and seed-cluster images (for example from NVKR) ─────
+# Files on the Ansible controller. Empty: build them on the bootstrap host
+# from the pinned release, as above.
+nvke_nvkectl_file: ""
+# OCI image archives for `nerdctl load`, each holding one image whose
+# org.opencontainers.image.ref.name is the reference below. Both or neither.
+nvke_controller_image_archive: ""
+nvke_provisioned_image_archive: ""
+# References the bootstrap side-loads into its seed cluster.
+nvke_controller_image: nke-controller:{{ nvke_version }}
+nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
+
 # ── Management cluster (site spec) ───────────────────────────────────────
 # Lower-case RFC 1123 label; names the kubeconfig, the key file and the
 # credentials directory.

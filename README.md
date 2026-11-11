@@ -160,6 +160,28 @@ all:
 ansible-playbook -i inventory.yml omerfsen.nvke.cluster
 ```
 
+### Prebuilt artifacts (for example from NVKR)
+
+By default nvkectl and the two seed-cluster images are built on the bootstrap
+host and the node image with Packer, all from the pinned release. To deploy
+artifacts built elsewhere instead, such as by
+[NVIDIA Kubernetes Recipes](https://github.com/dsx-ai-factory/nvkr) through
+[omerfsen.nvkr](https://github.com/omerfsen/nvidia-nvkr), set:
+
+| Variable | Takes |
+|---|---|
+| `node_image_file` | A node image (qcow2) on the KVM host; nothing is built |
+| `nvke_nvkectl_file` | nvkectl, a file on the Ansible controller |
+| `nvke_controller_image_archive`, `nvke_provisioned_image_archive` | OCI archives for `nerdctl load`, both or neither |
+| `nvke_controller_image`, `nvke_provisioned_image` | The references those archives load as |
+| `nvke_cni_version` | The OVN-Kubernetes version the node image stages |
+
+omerfsen.nvkr writes them to a vars file:
+
+```shell
+ansible-playbook -i inventory/kvm playbooks/kvm.yml -e @/var/lib/nvkr/handoff/nvke-vars.yml
+```
+
 ## Documentation
 
 - [How it works](https://github.com/omerfsen/nvke/blob/main/docs/how-it-works.md): every step, and why it is done that way
