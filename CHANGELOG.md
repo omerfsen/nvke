@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/omerfsen/nvke/compare/v0.2.0...v0.3.0) (2026-11-11)
+
+
+### Features
+
+* **nvke:** accept prebuilt nvkectl, seed images and node image ([#7](https://github.com/omerfsen/nvke/issues/7)) ([87e7f2a](https://github.com/omerfsen/nvke/commit/87e7f2a154240713d33d845d874573c9ecd575bb))
+
 ## [0.2.0](https://github.com/omerfsen/nvke/compare/v0.1.0...v0.2.0) (2026-11-03)
 
 
