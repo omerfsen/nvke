@@ -8,7 +8,7 @@ entry points, run in this order:
 |---|---|---|
 | `bootstrap_host` | the bootstrap host | Standalone nerdctl/containerd/buildkitd, kind, kubectl, clusterctl, Helm and Go at NVKE's pins; `nvkectl` and the two seed-cluster images from the pinned release; the site's SPIRE CA; the nodes' first-boot user data |
 | `node` | every node (built from the NVKE node image) | SPIRE pointed at the bootstrap host, Kubernetes and OVN-Kubernetes packages, the docs' Verify checks, the TPM endorsement-key thumbprint |
-| `site` | the bootstrap host | `nvkectl bootstrap site` once, the Verify checks, the kubeconfig and keys to the controller |
+| `site` | the bootstrap host | `nvkectl bootstrap site` once, the Verify checks, the kubeconfig and keys to the controller; a rerun fails on a cluster bootstrapped with another `nvke_version`, since NVKE does not upgrade it in place |
 
 ```yaml
 - hosts: nvke_bootstrap[0]

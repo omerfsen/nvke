@@ -20,8 +20,8 @@ NVIDIA Infra Controller (NICo), which come later.
 
 ## The release
 
-Everything is built from one NVKE release, `v0.22.0`, and the tag must
-resolve to commit `400c24fb`: a moved tag fails the run instead of building
+Everything is built from one NVKE release, `v0.23.1`, and the tag must
+resolve to commit `347baabc`: a moved tag fails the run instead of building
 something else. NVKE publishes no node image and no bootstrap container
 images, so both are built from that checkout, as the docs do. Every
 downloaded tool is pinned to NVKE's own version and checksum
@@ -40,9 +40,14 @@ make -C os-image boot-smoke REQUIRE_ACCELERATION=1
 
 `image-native` installs Ubuntu 26.04.1 with the `linux-nvidia` kernel from the
 server ISO in a QEMU VM with Packer, then installs `nvke-agent`, `spire-agent`,
-NVIDIA's DOCA Open vSwitch, and stages the Kubernetes (`nvke-kubeadm-distro-*`)
-and OVN-Kubernetes packages in a local apt repository on the image,
+NVIDIA's DOCA Open vSwitch (`doca-openvswitch-switch` 3.5.0, in kernel mode),
+and stages the Kubernetes (`nvke-kubeadm-distro-*` for 1.34.2, 1.35.3 and
+1.36.3) and OVN-Kubernetes packages in a local apt repository on the image,
 `/usr/lib/nvke/debs`. Nodes install them from there without network access.
+The DOCA debs come from NVIDIA's DOCA apt repository (`linux.mellanox.com`)
+at build time, checked against the SHA-256 in NVKE's lock, so the build host
+needs to reach it; nodes never do. Before v0.23.0 the image ran Ubuntu's
+`openvswitch-switch`.
 `boot-smoke` boots a copy and checks the image contract. The role installs Go
 1.27.3 and Packer 1.15.4 in its build directory, not system-wide, and runs
 the build from its own clean checkout (the build refuses a modified one).
@@ -66,12 +71,15 @@ Go and Make, run as root. The role installs:
   data root, so a Docker or Kubernetes containerd on the same host is never
   touched. `/etc/nerdctl/nerdctl.toml` names that socket and sets
   `cni_netconfpath = "/etc/containerd-nerdctl/net.d"`, as the docs require.
+  Since v0.23.0 `nvkectl bootstrap site` refuses to start while
+  `/etc/cni/net.d` holds a `nerdctl-*.conflist`; with that setting nerdctl
+  never writes one there.
 - kind v0.32.0, kubectl v1.36.0, clusterctl v1.13.6, Helm v4.2.4, Go 1.27.3.
 - `nvkectl`, built with `make -C cli build` (the docs: not `go build`, the
   Makefile stamps the version and the Cluster API version into it).
 - The two seed-cluster images, built with `make -C cli images` and tagged with
-  the release (`nke-controller:v0.22.0`,
-  `cluster-api-provider-provisioned:v0.22.0`), passed to the bootstrap with
+  the release (`nke-controller:v0.23.1`,
+  `cluster-api-provider-provisioned:v0.23.1`), passed to the bootstrap with
   `--nvke-controller-image` and `--provisioned-provider-image`.
 
 ### The SPIRE CA and the node user data
@@ -166,7 +174,10 @@ drives `kubeadm init` on one node and control-plane joins on the others
 through it, with no SSH. Every node becomes a control-plane node. At the end
 `nvkectl` removes the control-plane `NoSchedule` taint (the management plane
 runs on these nodes), saves the outputs and deletes the seed cluster. A run
-whose kubeconfig already answers is never repeated.
+whose kubeconfig already answers is never repeated. The role records the
+release in `nvke-release` next to it, and a later run with another
+`nvke_version` fails rather than leave the cluster on the old release while
+reporting success.
 
 During the bootstrap NVKE moves each node's NIC into an Open vSwitch bridge
 that takes over its address. See [MAC addresses](kvm.md#mac-addresses) for why
@@ -184,6 +195,7 @@ taint is left, the seed cluster is gone.
 | `spire-ca.crt`, `spire-ca.key` | controller, `~/.nvke/<cluster>/`; bootstrap host | The site's SPIRE CA; later installs need it |
 | `clusterstaticentry-crd.yaml`, `clusterstaticentries.yaml` | controller, `~/.nvke/<cluster>/` | SPIRE registrations exported from the seed |
 | `node-user-data.yaml` | controller, `~/.nvke/<cluster>/` | The nodes' first-boot user data |
+| `nvke-release` | bootstrap host | The NVKE release the cluster was bootstrapped with |
 
 Keep `~/.nvke/<cluster>/` safe: the docs ask for the kubeconfig and the key
 file to go to secure storage.
@@ -225,5 +237,6 @@ passes on a GPU and is deleted again.
 
 The docs' known limitations apply: the management cluster does not upgrade,
 scale or replace its own nodes, and NVKE has no backup or restore procedure
-for it. It is a plain Kubernetes cluster until the management plane is
+for it. Moving to a new NVKE release means a new management cluster: see
+[Move to a new NVKE release](kvm.md#move-to-a-new-nvke-release). It is a plain Kubernetes cluster until the management plane is
 installed on it.

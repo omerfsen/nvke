@@ -40,7 +40,7 @@ comes with no guarantee of any kind; see
 
 | | Supported |
 |---|---|
-| NVKE | v0.22.0 (commit `400c24f`), pinned |
+| NVKE | v0.23.1 (commit `347baab`), pinned |
 | Kubernetes | 1.36.3 (NVKE's supported version), OVN-Kubernetes 2.4.2; 1.37 is not supported by NVKE yet |
 | Node OS | The NVKE reference node image: Ubuntu 26.04.1 (default) or 24.04.5, `linux-nvidia` kernel, amd64 or arm64 |
 | Nodes | 1, 3 or 5, each a control plane with a TPM 2.0; a VIP with more than one |
@@ -49,19 +49,21 @@ comes with no guarantee of any kind; see
 | ansible-core | 2.16 or later |
 | Provisioning | KVM/libvirt (one hypervisor on its NAT network, or several on a shared bridge) |
 | GPU | NVIDIA GPU Operator v26.7.2 (the version AICR pins), driver 615.71.09 (CUDA 13.4); on KVM, one GPU passed through to a node VM with VFIO |
-| Tested | NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator v26.7.2 ready with driver 615.71.09 (CUDA 13.4, default) and 595.91.07 (CUDA 13.2), CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both, rerun `changed=0` |
+| Tested | NVKE v0.23.1: not run yet. NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator v26.7.2 ready with driver 615.71.09 (CUDA 13.4, default) and 595.91.07 (CUDA 13.2), CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both, rerun `changed=0` |
 
 ## Component versions
 
 Everything this collection installs, and where each version comes from. The
-deployed versions were read off a running cluster built by `kvm.yml`.
+deployed versions were read off a running cluster built by `kvm.yml` with
+v0.22.0; for v0.23.1 they come from its release notes and source, and the
+kernel is whatever `linux-nvidia` Ubuntu ships when the image is built.
 
 ### Pinned by this collection
 
 | Component | Version | Where |
 |---|---|---|
-| NVKE | v0.22.0, commit `400c24fb` | `nvke_version`, `node_image_nvke_version` (a moved tag fails the run) |
-| Kubernetes | 1.36.3 | NVKE's supported version, set in the site spec. 1.37 is not supported by NVKE yet: the node image stages 1.37.2 packages, but NVKE v0.22.0 (and v0.23.0-rc.2) qualify and support 1.36.3 only |
+| NVKE | v0.23.1, commit `347baabc` | `nvke_version`, `node_image_nvke_version` (a moved tag fails the run) |
+| Kubernetes | 1.36.3 | NVKE's supported version, set in the site spec. The node image also stages 1.34.2 and 1.35.3, which NVKE does not support. 1.37 is not supported by NVKE yet: v0.23.1 neither stages nor qualifies it; the v0.24.0 release candidates stage 1.37.2 but still support 1.36.3 only |
 | OVN-Kubernetes | 2.4.2 | `nvke_cni_version`, from the node image |
 | Node image | Ubuntu 26.04.1 server ISO | `node_image_ubuntu_release` |
 | Bootstrap host image | Ubuntu 24.04 cloud image, release 20261017 | `libvirt_vm_image_url`, sha256 checked |
@@ -83,13 +85,13 @@ Every downloaded binary is pinned to NVKE's own version and checksum
 
 | Component | Version |
 |---|---|
-| nvkectl | v0.2.0 |
-| nvke-agent | v0.3.0 |
-| Seed-cluster images (`nke-controller`, `cluster-api-provider-provisioned`) | v0.22.0 |
+| nvkectl | v0.3.0 |
+| nvke-agent | v0.4.0 |
+| Seed-cluster images (`nke-controller`, `cluster-api-provider-provisioned`) | v0.23.1 |
 | Kernel | `linux-nvidia` 7.0.0-1018 |
 | containerd / runc (on the nodes) | 2.3.0 / 1.4.2 |
 | SPIRE agent | 1.14.1 (TPM plugin 1.9.0) |
-| Open vSwitch | 3.7.1 |
+| Open vSwitch | NVIDIA DOCA OVS 3.5.0 (`doca-openvswitch-switch` 3.5.0052), kernel mode; Ubuntu's 3.7.1 up to v0.22.0 |
 | kube-vip | v1.2.0 |
 | etcd | 3.6.8 |
 | CoreDNS | v1.14.2 |
@@ -175,6 +177,7 @@ artifacts built elsewhere instead, such as by
 | `nvke_controller_image_archive`, `nvke_provisioned_image_archive` | OCI archives for `nerdctl load`, both or neither |
 | `nvke_controller_image`, `nvke_provisioned_image` | The references those archives load as |
 | `nvke_cni_version` | The OVN-Kubernetes version the node image stages |
+| `nvke_version` | The NVKE release the artifacts were built from (NVKR v0.1.0 builds v0.22.0); the site records it |
 
 omerfsen.nvkr writes them to a vars file:
 
@@ -195,7 +198,8 @@ ansible-playbook -i inventory/kvm playbooks/kvm.yml -e @/var/lib/nvkr/handoff/nv
 ## Roadmap
 
 - The NVKE management plane (Cluster API, CAPNICo, SPIRE, the NVKE API) on
-  the management cluster
+  the management cluster, as NVKE v0.23's *Install the management plane*
+  documents it (`deploy/nvke-deploy.sh`; needs a NICo endpoint)
 - GPU workload clusters through NICo (GPU nodes on the management cluster
   are done)
 - Bare-metal provisioning next to `libvirt_vm`

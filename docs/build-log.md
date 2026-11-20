@@ -449,3 +449,67 @@ NVKE v0.22.0 supports Kubernetes 1.36.3 only. Its node image also stages
 `nvke-kubeadm-distro` packages for 1.37.2, which the docs list as not
 supported; v0.23.0-rc.2 still pins 1.36.3, and its qualification stream is
 `forge-gb200-amd64-ubuntu-24.04-kube-1.36`. The collection stays on 1.36.3.
+
+## 2026-11-20: NVKE v0.23.1
+
+### What changed upstream
+
+v0.23.1 (tag object on `347baabc`, 2026-11-03) is v0.23.0 plus one
+controller backport (tenant kubeconfigs parsed with an allowlist), so the
+real step is v0.22.0 to v0.23.0. Its release notes put nvkectl, the
+controller and the CAPI provisioned provider at v0.3.0 and the node agent at
+v0.4.0. Checked against what the collection uses:
+
+- Tool pins (`make/tool-versions.mk`): unchanged. nerdctl 2.3.5, kind
+  v0.32.0, kubectl v1.36.0, clusterctl v1.13.6, Helm v4.2.4, Go 1.27.3 and
+  Packer 1.15.4 stay; the only additions are promtool and a JSON schema for
+  chart checks.
+- `make -C cli build`, `make -C cli images` with `CONTROLLER_IMAGE` and
+  `CAPI_PROVISIONED_IMAGE`, `make -C os-image image-native` and
+  `boot-smoke`: unchanged.
+- `nvkectl generate sitespec` keys and `bootstrap site` flags: unchanged. New
+  flags (`--otlp-endpoint`, `--allow-control-plane-without-vip`) are opt-in.
+- The node user data (`/etc/nke/spire.env`, the trust bundle, the package
+  names): unchanged. *Prepare nodes* adds an SSH user only for the new
+  management-plane install.
+- New preflight: `bootstrap site` stops when `/etc/cni/net.d` holds a
+  `nerdctl-*.conflist`, and as root it points kind's nerdctl at
+  `/etc/containerd-nerdctl/net.d`. The bootstrap host already sets that
+  directory in `nerdctl.toml`, so nothing changes.
+- With `infra.provider: nico` the bootstrap now installs the NVKE stack on the
+  site cluster and needs registry images. The collection uses the provisioned
+  provider, which is not affected.
+- The SPIRE handover package (seed to site) is in the tree but no command
+  calls it yet.
+- Node image: Open vSwitch is now NVIDIA's DOCA build,
+  `doca-openvswitch-switch` 3.5.0052, in kernel mode, fetched at build time
+  from `linux.mellanox.com` and checked against NVKE's SHA-256 lock. The build
+  host needs that host; it already has `curl`, `sha256sum` and `dpkg-dev`.
+  `boot-smoke` now checks the package, the masked `ovs-exporter` and a running
+  `ovs-vswitchd`.
+- New docs page *Install the management plane* (Cluster API, CAPNICo, SPIRE,
+  NKTP, PostgreSQL, Temporal, the controller through `deploy/nvke-deploy.sh`).
+  It needs a NICo endpoint and credentials, so it stays on the roadmap.
+
+### Kubernetes 1.37, corrected
+
+The "Kubernetes 1.37" note above is wrong about the image. The 1.37.2 line came
+from docs.nvidia.com/nvke, which was showing main-branch docs. The v0.22.0
+build log here lists `nvke-kubeadm-distro` for 1.34.2, 1.35.3 and 1.36.3
+only, and `K8S_VERSIONS` is `v1.36.3 v1.35.3 v1.34.2` at both v0.22.0 and
+v0.23.1. 1.37.2 joins that list in the v0.24.0 release candidates (rc.14,
+2026-11-19), whose docs still support 1.36.3 only. The collection stays on
+1.36.3.
+
+### Moving a running cluster
+
+NVKE does not upgrade a management cluster in place, and `site.yml` leaves a
+cluster whose kubeconfig answers alone. With only the pin changed, a rerun
+would have built v0.23.1's tools next to a v0.22.0 cluster and reported
+success. The site entry point now writes the release to `nvke-release` after
+a bootstrap and fails on a rerun with another `nvke_version`. Clusters from
+before the record get a note and are left alone. Source, image and node-image
+paths already carry the version, so the old release's artifacts stay intact.
+
+NVKR v0.1.0 builds NVKE v0.22.0 and its handoff vars file sets no
+`nvke_version`, so a prebuilt run now has to set it too.

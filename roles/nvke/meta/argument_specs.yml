@@ -13,11 +13,11 @@ argument_specs:
     options:
       nvke_version:
         type: str
-        default: v0.22.0
+        default: v0.23.1
         description: NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from.
       nvke_commit:
         type: str
-        default: 400c24fb6465b042be883d6b62472528520d6291
+        default: 347baabc64ba320176c6c2ef956e555350124d19
         description: Commit the tag must resolve to.
       nvke_nvkectl_file:
         type: path
@@ -187,6 +187,7 @@ argument_specs:
     description:
       - Writes the nodes file and site spec,
       - validates it and runs C(nvkectl bootstrap site) once; a cluster whose kubeconfig answers is left alone.
+      - That cluster must be on C(nvke_version), the release recorded at its bootstrap; NVKE does not upgrade it in place.
       - Waits for every node to be Ready, copies the etcd encryption key and SPIRE entries to the controller,
       - removes the key from the bootstrap host, and writes the admin kubeconfig.
       - Runs on the bootstrap host after the bootstrap_host entry point and the node entry point on every node.
@@ -194,7 +195,7 @@ argument_specs:
     options:
       nvke_version:
         type: str
-        default: v0.22.0
+        default: v0.23.1
         description: NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from.
       nvke_controller_image:
         type: str

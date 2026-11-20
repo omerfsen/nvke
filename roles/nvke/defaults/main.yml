@@ -3,8 +3,8 @@
 # NVKE source nvkectl and the two bootstrap images are built from: a release
 # tag and the commit it must resolve to. Build nvkectl from the same release
 # as the node image and, later, the management plane.
-nvke_version: v0.22.0
-nvke_commit: 400c24fb6465b042be883d6b62472528520d6291
+nvke_version: v0.23.1
+nvke_commit: 347baabc64ba320176c6c2ef956e555350124d19
 nvke_repo: https://github.com/dsx-ai-factory/nvke.git
 
 # ── Prebuilt nvkectl and seed-cluster images (for example from NVKR) ─────
@@ -24,7 +24,7 @@ nvke_provisioned_image: cluster-api-provider-provisioned:{{ nvke_version }}
 # credentials directory.
 nvke_cluster_name: nvke-mgmt
 # Without a leading v. The node image must carry it (the reference image
-# stages 1.34.2, 1.35.3, 1.36.3 and 1.37.2; NVKE supports 1.36.3).
+# stages 1.34.2, 1.35.3 and 1.36.3; NVKE supports 1.36.3 only).
 nvke_k8s_version: 1.36.3
 # OVN-Kubernetes version staged on the node image.
 nvke_cni_version: 2.4.2

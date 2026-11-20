@@ -17,9 +17,9 @@ With the defaults in `inventory/kvm/group_vars/all/defaults.yml`:
 | VM | Address | Image | Size | Role |
 |---|---|---|---|---|
 | `nvke-bootstrap` | 192.168.122.100 | Ubuntu 24.04 cloud image | 4 vCPU, 8 GiB, 40 GiB | bootstrap host |
-| `nvke-cp-01` | 192.168.122.101 | NVKE node image, Ubuntu 26.04.1 | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0 |
-| `nvke-cp-02` | 192.168.122.102 | NVKE node image | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0 |
-| `nvke-cp-03` | 192.168.122.103 | NVKE node image | 4 vCPU, 8 GiB, 40 GiB | control plane, TPM 2.0; the GPU node with a GPU passed through (8 vCPU, 24 GiB, 120 GiB) |
+| `nvke-cp-01` | 192.168.122.101 | NVKE node image, Ubuntu 26.04.1 | 6 vCPU, 16 GiB, 40 GiB | control plane, TPM 2.0 |
+| `nvke-cp-02` | 192.168.122.102 | NVKE node image | 6 vCPU, 16 GiB, 40 GiB | control plane, TPM 2.0 |
+| `nvke-cp-03` | 192.168.122.103 | NVKE node image | 6 vCPU, 16 GiB, 40 GiB | control plane, TPM 2.0; the GPU node with a GPU passed through (12 vCPU, 32 GiB, 120 GiB) |
 | API VIP | 10.250.0.10 | | | announced over BGP |
 
 Every VM is UEFI (OVMF without Secure Boot), q35, virtio, with a
@@ -35,12 +35,13 @@ plus the package builds) and kept next to the disks.
 
 - Ubuntu or Debian with KVM, libvirt, `virt-install`, `qemu-utils`,
   `genisoimage`, `ovmf` and `swtpm`. `libvirt_vm` installs what is missing.
-- About 30 GiB of RAM free for the four VMs and 10 GiB more while the image
-  builds.
+- About 56 GiB of RAM free for the four VMs (about 72 GiB with a GPU node,
+  whose memory VFIO pins) and 10 GiB more while the image builds.
 - Disk: the image build peaks at about 40 GiB in `node_image_build_dir`; the
   image is 3 GiB; each VM disk grows to what it uses (about 10-20 GiB).
 - Outbound access to GitHub, the Go module proxy, Ubuntu's archive and ISO
-  mirrors, Docker Hub, `ghcr.io`, `registry.k8s.io` and `dl.k8s.io`.
+  mirrors, NVIDIA's DOCA apt repository (`linux.mellanox.com`, for the image's
+  Open vSwitch), Docker Hub, `ghcr.io`, `registry.k8s.io` and `dl.k8s.io`.
 
 Put the big directories on a large disk in a gitignored override, for example
 `inventory/kvm/group_vars/all/local.yml`:
@@ -150,7 +151,7 @@ nvke_kvm_gpu_devices: ["0000:01:00.0", "0000:01:00.1"]   # lspci -Dnn | grep -i 
    (`omerfsen.nvke.gpu_passthrough`). The first run stops there and asks for
    a reboot of the hypervisor; run the playbook again after it;
 2. gives them to the last node, `nvke-cp-03` (`nvke_kvm_gpu_vm`), with a
-   bigger size (`nvke_kvm_gpu_vm_size`: 8 vCPU, 24 GiB, 120 GiB), placed on
+   bigger size (`nvke_kvm_gpu_vm_size`: 12 vCPU, 32 GiB, 120 GiB), placed on
    the first hypervisor;
 3. after the cluster, installs the GPU Operator from the bootstrap host
    (`omerfsen.nvke.gpu_operator`) and runs a CUDA pod on the GPU.
@@ -160,6 +161,23 @@ group); the role checks it. With the GPU on vfio-pci the host cannot use it,
 and a display attached to it stays dark. Give it back with
 `nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
 reboot.
+
+## Move to a new NVKE release
+
+NVKE does not upgrade a management cluster in place, so a new release means a
+new cluster. With a new `nvke_version`, `kvm.yml` against a running cluster
+fails at "The running cluster is on the pinned release" (a cluster from before
+the release was recorded only gets a note and is left alone). To move:
+
+1. Destroy the VMs (above). The node image of the old release stays, under
+   its own name.
+2. Run `kvm.yml` again. It builds the new release's node image, `nvkectl` and
+   seed-cluster images in their own versioned directories, and bootstraps a
+   new cluster.
+
+To keep the running cluster instead, pin its release in `local.yml`
+(`nvke_version`, `nvke_commit`, `node_image_nvke_version`,
+`node_image_nvke_commit`).
 
 In NVKE's design GPU nodes belong to workload clusters that NVIDIA Infra
 Controller (NICo) provisions on bare metal. Without NICo the GPU goes to a
@@ -237,13 +255,16 @@ Where to look on the VMs:
 
 ```yaml
 nvke_kvm_node_count: 3                                     # 1, 3 or 5
-nvke_kvm_node_size: {vcpus: 4, memory_mb: 8192, disk_gb: 40}
+nvke_kvm_node_size: {vcpus: 6, memory_mb: 16384, disk_gb: 40}
+nvke_kvm_gpu_vm_size: {vcpus: 12, memory_mb: 32768, disk_gb: 120}  # the GPU node
 nvke_kvm_bootstrap_size: {vcpus: 4, memory_mb: 8192, disk_gb: 40}
-nvke_kvm_vm_sizes: {nvke-cp-01: {vcpus: 8, memory_mb: 16384, disk_gb: 80}}
+nvke_kvm_vm_sizes: {nvke-cp-01: {vcpus: 8, memory_mb: 24576, disk_gb: 80}}
 nvke_system_reserved_memory: 1Gi                           # NVKE's default is 16Gi
 ```
 
-Sizes apply when a VM is created. The node count is fixed once the cluster is
+The node and GPU node sizes fit AICR 1.3.0 on top (its NKTP telemetry
+requests about 14 GiB); without it, 4 vCPU and 8 GiB nodes are enough for the
+management cluster alone. Sizes apply when a VM is created. The node count is fixed once the cluster is
 bootstrapped: NVKE's management cluster does not add, remove or replace its
 own nodes.
 
@@ -272,3 +293,20 @@ and the SSH keys stay, so the next run builds nothing; FRR stays configured
 and simply has no sessions. A GPU stays on vfio-pci: give it back to the host with
 `nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
 reboot.
+
+## Move to a new NVKE release
+
+NVKE does not upgrade a management cluster in place, so a new release means a
+new cluster. With a new `nvke_version`, `kvm.yml` against a running cluster
+fails at "The running cluster is on the pinned release" (a cluster from before
+the release was recorded only gets a note and is left alone). To move:
+
+1. Destroy the VMs (above). The node image of the old release stays, under
+   its own name.
+2. Run `kvm.yml` again. It builds the new release's node image, `nvkectl` and
+   seed-cluster images in their own versioned directories, and bootstraps a
+   new cluster.
+
+To keep the running cluster instead, pin its release in `local.yml`
+(`nvke_version`, `nvke_commit`, `node_image_nvke_version`,
+`node_image_nvke_commit`).
