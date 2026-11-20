@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/omerfsen/nvke/compare/v0.3.0...v0.4.0) (2026-11-20)
+
+
+### Features
+
+* **nvke:** move to NVKE v0.23.1 with the newest GPU components ([#9](https://github.com/omerfsen/nvke/issues/9)) ([8b1dda1](https://github.com/omerfsen/nvke/commit/8b1dda1d1ebfce843bac35029be923924d4d539f))
+
 ## [0.3.0](https://github.com/omerfsen/nvke/compare/v0.2.0...v0.3.0) (2026-11-11)
 
 
