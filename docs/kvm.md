@@ -162,23 +162,6 @@ and a display attached to it stays dark. Give it back with
 `nvke_kvm_gpu_passthrough_mode: off`, `playbooks/gpu_passthrough.yml` and a
 reboot.
 
-## Move to a new NVKE release
-
-NVKE does not upgrade a management cluster in place, so a new release means a
-new cluster. With a new `nvke_version`, `kvm.yml` against a running cluster
-fails at "The running cluster is on the pinned release" (a cluster from before
-the release was recorded only gets a note and is left alone). To move:
-
-1. Destroy the VMs (above). The node image of the old release stays, under
-   its own name.
-2. Run `kvm.yml` again. It builds the new release's node image, `nvkectl` and
-   seed-cluster images in their own versioned directories, and bootstraps a
-   new cluster.
-
-To keep the running cluster instead, pin its release in `local.yml`
-(`nvke_version`, `nvke_commit`, `node_image_nvke_version`,
-`node_image_nvke_commit`).
-
 In NVKE's design GPU nodes belong to workload clusters that NVIDIA Infra
 Controller (NICo) provisions on bare metal. Without NICo the GPU goes to a
 management-cluster node: the management cluster then runs GPU workloads
@@ -264,7 +247,8 @@ nvke_system_reserved_memory: 1Gi                           # NVKE's default is 1
 
 The node and GPU node sizes fit AICR 1.3.0 on top (its NKTP telemetry
 requests about 14 GiB); without it, 4 vCPU and 8 GiB nodes are enough for the
-management cluster alone. Sizes apply when a VM is created. The node count is fixed once the cluster is
+management cluster alone. Sizes apply when a VM is created. The node count is
+fixed once the cluster is
 bootstrapped: NVKE's management cluster does not add, remove or replace its
 own nodes.
 
@@ -298,8 +282,11 @@ reboot.
 
 NVKE does not upgrade a management cluster in place, so a new release means a
 new cluster. With a new `nvke_version`, `kvm.yml` against a running cluster
-fails at "The running cluster is on the pinned release" (a cluster from before
-the release was recorded only gets a note and is left alone). To move:
+stops at the start of the bootstrap host's play, at "A running cluster from
+this host is on the pinned release", before it builds or relinks anything
+there (the node image play before it may already have built the new release's
+image, under its own name). A cluster from before the release was recorded
+only gets a note and is left alone. To move:
 
 1. Destroy the VMs (above). The node image of the old release stays, under
    its own name.

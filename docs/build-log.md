@@ -587,3 +587,25 @@ older exporters:
 05-gpu-tensorrt              PASS         5s    TensorRT 11.5.0.61
 06-gpu-operator-metrics      PASS         5s    15 DCGM samples
 ```
+
+### The release check, second version
+
+An independent review of the merged change found three gaps in the first
+version of the check, which wrote `nvke-release` after the bootstrap and read
+it only in the site play:
+
+- A run cut off during the 10-20 minute bootstrap, while the async nvkectl
+  carried on, left a cluster with no record, so the check stayed off for it.
+  The record is now written just before `nvkectl bootstrap site`; a bootstrap
+  that leaves no answering cluster runs again and rewrites it.
+- The check came at the end of `kvm.yml`, after the bootstrap host had
+  already built the new release's nvkectl and seed images and relinked
+  `/usr/local/bin/nvkectl` to it. It now also runs first in the bootstrap
+  host play, in `release_check.yml`, before anything is built or relinked.
+- A record that could not be read was reported as missing. It is now found
+  with `stat` and read without ignoring errors.
+
+It also caught the "Move to a new NVKE release" section pasted twice in
+`docs/kvm.md` (once inside "GPU nodes"), and that the NVKR handoff command in
+the README needs `-e nvke_version=v0.22.0` while NVKR's vars file does not set
+it.

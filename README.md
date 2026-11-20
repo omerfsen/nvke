@@ -182,10 +182,13 @@ artifacts built elsewhere instead, such as by
 | `nvke_cni_version` | The OVN-Kubernetes version the node image stages |
 | `nvke_version` | The NVKE release the artifacts were built from (NVKR v0.1.0 builds v0.22.0); the site records it |
 
-omerfsen.nvkr writes them to a vars file:
+omerfsen.nvkr writes them to a vars file. Its vars file does not set
+`nvke_version` yet, and NVKR v0.1.0 builds NVKE v0.22.0, so pass that too;
+otherwise the site records the collection's default release for a v0.22.0
+cluster:
 
 ```shell
-ansible-playbook -i inventory/kvm playbooks/kvm.yml -e @/var/lib/nvkr/handoff/nvke-vars.yml
+ansible-playbook -i inventory/kvm playbooks/kvm.yml -e @/var/lib/nvkr/handoff/nvke-vars.yml -e nvke_version=v0.22.0
 ```
 
 ## Documentation

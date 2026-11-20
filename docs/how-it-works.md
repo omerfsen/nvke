@@ -174,10 +174,11 @@ drives `kubeadm init` on one node and control-plane joins on the others
 through it, with no SSH. Every node becomes a control-plane node. At the end
 `nvkectl` removes the control-plane `NoSchedule` taint (the management plane
 runs on these nodes), saves the outputs and deletes the seed cluster. A run
-whose kubeconfig already answers is never repeated. The role records the
-release in `nvke-release` next to it, and a later run with another
-`nvke_version` fails rather than leave the cluster on the old release while
-reporting success.
+whose kubeconfig already answers is never repeated. Before the bootstrap the
+role records the release in `nvke-release` next to it. A later run with
+another `nvke_version` stops at the start of the bootstrap host's play, before
+it builds or relinks anything there, rather than leave the cluster on the old
+release while reporting success.
 
 During the bootstrap NVKE moves each node's NIC into an Open vSwitch bridge
 that takes over its address. See [MAC addresses](kvm.md#mac-addresses) for why
