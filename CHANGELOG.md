@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/omerfsen/nvke/compare/v0.4.0...v0.4.1) (2026-11-20)
+
+
+### Bug fixes
+
+* **nvke:** check the recorded release before the bootstrap host builds ([#11](https://github.com/omerfsen/nvke/issues/11)) ([c3e1f7a](https://github.com/omerfsen/nvke/commit/c3e1f7a5532b14993e4c9235a7d1aaebe797fff1))
+
 ## [0.4.0](https://github.com/omerfsen/nvke/compare/v0.3.0...v0.4.0) (2026-11-20)
 
 
