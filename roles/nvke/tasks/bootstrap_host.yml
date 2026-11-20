@@ -26,6 +26,10 @@
     fail_msg: The bootstrap host is an amd64 or arm64 Debian/Ubuntu host with systemd.
     quiet: true
 
+# Before anything is downloaded, built or relinked for the pinned release.
+- name: A running cluster from this host is on the pinned release
+  ansible.builtin.include_tasks: release_check.yml
+
 - name: Installed packages
   ansible.builtin.package_facts:
 

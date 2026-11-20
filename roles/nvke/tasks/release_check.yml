@@ -1,0 +1,45 @@
+---
+# NVKE does not upgrade a management cluster in place, and a running cluster
+# is never bootstrapped again, so a run with another release pinned would
+# build that release's tools and leave the cluster on the old one. The site
+# entry point records the release in nvke-release before it bootstraps; this
+# stops a run against a cluster that answers and was bootstrapped with
+# another release. Included first by bootstrap_host, before anything is
+# built or relinked, and again by site.
+
+- name: Release recorded for this site
+  ansible.builtin.stat:
+    path: "{{ nvke_workdir }}/{{ nvke_cluster_name }}/nvke-release"
+    get_checksum: false
+  register: nvke_release_marker
+
+- name: Check the recorded release against the pinned one
+  when: nvke_release_marker.stat.exists
+  block:
+    - name: Read the recorded release
+      ansible.builtin.slurp:
+        src: "{{ nvke_release_marker.stat.path }}"
+      register: nvke_release_recorded
+
+    # A release recorded for a cluster that never came up does not count:
+    # the next site run bootstraps again and records the pinned release.
+    - name: Does the recorded cluster answer?
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ nvke_workdir }}/{{ nvke_cluster_name }}/{{ nvke_cluster_name }}.kubeconfig
+        get --raw /readyz --request-timeout=10s
+      register: nvke_release_cluster
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: nvke_release_recorded.content | b64decode | trim != nvke_version
+      environment: "{{ nvke_build_env }}"
+
+    - name: The running cluster is on the pinned release
+      ansible.builtin.assert:
+        that: nvke_release_recorded.content | b64decode | trim == nvke_version or nvke_release_cluster.rc != 0
+        fail_msg: >-
+          {{ nvke_cluster_name }} was bootstrapped with NVKE
+          {{ nvke_release_recorded.content | b64decode | trim }}, and nvke_version is
+          {{ nvke_version }}. NVKE does not upgrade a management cluster in place:
+          pin the release it runs, or destroy it and bootstrap a new one.
+        quiet: true
