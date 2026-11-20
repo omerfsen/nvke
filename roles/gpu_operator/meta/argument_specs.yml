@@ -4,7 +4,7 @@ argument_specs:
     short_description: NVIDIA GPU Operator on an NVKE cluster, proven with a CUDA pod.
     description:
       - The NVKE node image carries no GPU driver; the NVIDIA GPU Operator installs it, the container toolkit and the device plugin.
-      - Installs the chart AICR pins (NVIDIA AI Cluster Runtime) from a checksum-verified download, with the toolkit values
+      - Installs the newest GPU Operator chart from a checksum-verified download, with the toolkit values
       - AICR's NVKE recipe uses (the toolkit reads containerd's config file, and only a GPU request reaches a GPU).
       - Installs or upgrades only when the release's chart or values differ. Then waits for every operand,
       - checks the GPUs are allocatable, and runs a CUDA vectorAdd pod on one, deleting it afterwards.
@@ -17,7 +17,7 @@ argument_specs:
         description: Path of the cluster's admin kubeconfig on the target host.
       gpu_operator_version:
         type: str
-        default: v26.7.2
+        default: v26.7.3
         description: GPU Operator chart version. Change O(gpu_operator_chart_sha256) with it.
       gpu_operator_chart_url:
         type: str
@@ -25,7 +25,7 @@ argument_specs:
         description: Where the chart is downloaded from.
       gpu_operator_chart_sha256:
         type: str
-        default: a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6
+        default: 506898724dc23aa55bbc9cbe6f3e28d413c20867e76715e726b6fff6ef13d4c7
         description: SHA-256 of the chart archive.
       gpu_operator_namespace:
         type: str
@@ -37,9 +37,9 @@ argument_specs:
         description: Helm release name.
       gpu_operator_driver_version:
         type: str
-        default: "615.71.09"
+        default: "620.70.06"
         description:
-          - NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.4).
+          - NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.5).
           - A driver image for the node's Ubuntu release must exist
           - (C(nvcr.io/nvidia/driver:<version>-ubuntu26.04) for the default node image).
       gpu_operator_values:

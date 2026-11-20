@@ -39,6 +39,36 @@
   when: nvke_site_kubeconfig_stat.stat.exists
   environment: "{{ nvke_build_env }}"
 
+# NVKE does not upgrade a management cluster in place, and a running cluster
+# is never bootstrapped again, so a run with another release pinned would
+# build that release's tools and leave the cluster on the old one.
+- name: Which release bootstrapped the running cluster?
+  ansible.builtin.slurp:
+    src: "{{ nvke_site_dir }}/nvke-release"
+  register: nvke_site_release
+  failed_when: false
+  when: nvke_site_ready.rc | default(1) == 0
+
+- name: The running cluster is on the pinned release
+  ansible.builtin.assert:
+    that: nvke_site_release.content | b64decode | trim == nvke_version
+    fail_msg: >-
+      {{ nvke_cluster_name }} was bootstrapped with NVKE
+      {{ nvke_site_release.content | b64decode | trim }}, and nvke_version is
+      {{ nvke_version }}. NVKE does not upgrade a management cluster in place:
+      pin the release it runs, or destroy it and bootstrap a new one.
+    quiet: true
+  when: nvke_site_release.content is defined
+
+- name: Note a cluster bootstrapped before the release was recorded
+  ansible.builtin.debug:
+    msg: >-
+      {{ nvke_cluster_name }} answers but has no {{ nvke_site_dir }}/nvke-release,
+      so this run cannot tell which NVKE release built it. It is left as it is.
+  when:
+    - nvke_site_ready.rc | default(1) == 0
+    - nvke_site_release.content is not defined
+
 - name: Bootstrap the management cluster
   when: nvke_site_ready.rc | default(1) != 0
   vars:
@@ -108,6 +138,12 @@
       async: 5400
       poll: 30
       changed_when: true
+
+    - name: Record the release the cluster was bootstrapped with
+      ansible.builtin.copy:
+        dest: "{{ nvke_site_dir }}/nvke-release"
+        content: "{{ nvke_version }}\n"
+        mode: "0644"
 
 # ── Verify ───────────────────────────────────────────────────────────────
 - name: Wait until every node is Ready

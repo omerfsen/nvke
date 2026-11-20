@@ -24,7 +24,7 @@ KVM host and installs what it needs.
         libvirt_vm_name: nvke-cp-01
         libvirt_vm_ip: 192.168.122.101
         libvirt_vm_mac: "00:16:3e:7a:00:65"
-        libvirt_vm_image_path: /var/lib/libvirt/images/nvke-node-non-fde-ubuntu-26.04.1-amd64-v0.22.0.qcow2
+        libvirt_vm_image_path: /var/lib/libvirt/images/nvke-node-non-fde-ubuntu-26.04.1-amd64-v0.23.1.qcow2
         libvirt_vm_tpm: true
 ```
 

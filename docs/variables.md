@@ -11,8 +11,8 @@ Prepare the bootstrap host: runtime, tools, nvkectl, seed-cluster images and the
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `nvke_version` | str | `v0.22.0` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. |
-| `nvke_commit` | str | `400c24fb6465b042be883d6b62472528520d6291` | Commit the tag must resolve to. |
+| `nvke_version` | str | `v0.23.1` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. |
+| `nvke_commit` | str | `347baabc64ba320176c6c2ef956e555350124d19` | Commit the tag must resolve to. |
 | `nvke_nvkectl_file` | path | `""` | A prebuilt nvkectl on the Ansible controller, for example from NVKR. Empty builds it from the pinned release. |
 | `nvke_controller_image_archive` | path | `""` | A prebuilt controller image as an OCI archive on the Ansible controller, loaded with `nerdctl load`. Its one image is named `nvke_controller_image`. Set with `nvke_provisioned_image_archive`, or neither. Empty builds both images from the pinned release. |
 | `nvke_provisioned_image_archive` | path | `""` | A prebuilt provisioned-provider image as an OCI archive, named `nvke_provisioned_image`. See `nvke_controller_image_archive`. |
@@ -64,7 +64,7 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `nvke_version` | str | `v0.22.0` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. (also in an earlier entry point) |
+| `nvke_version` | str | `v0.23.1` | NVKE release tag nvkectl and the seed-cluster images are built from. Use the release the node image was built from. (also in an earlier entry point) |
 | `nvke_controller_image` | str | `nke-controller:{{ nvke_version }}` | Reference of the controller image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. (also in an earlier entry point) |
 | `nvke_provisioned_image` | str | `cluster-api-provider-provisioned:{{ nvke_version }}` | Reference of the provisioned-provider image the bootstrap side-loads. With prebuilt archives, the reference the archive loads as. (also in an earlier entry point) |
 | `nvke_cluster_name` | str | `nvke-mgmt` | Management cluster name, a lower-case RFC 1123 label. Names the kubeconfig, the key file and the credentials directory. (also in an earlier entry point) |
@@ -91,8 +91,8 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `node_image_nvke_version` | str | `v0.22.0` | NVKE release tag to build from. |
-| `node_image_nvke_commit` | str | `400c24fb6465b042be883d6b62472528520d6291` | Commit the tag must resolve to. |
+| `node_image_nvke_version` | str | `v0.23.1` | NVKE release tag to build from. |
+| `node_image_nvke_commit` | str | `347baabc64ba320176c6c2ef956e555350124d19` | Commit the tag must resolve to. |
 | `node_image_nvke_repo` | str | `https://github.com/dsx-ai-factory/nvke.git` | NVKE Git repository. |
 | `node_image_file` | path | `""` | A prebuilt node image (qcow2) already on the KVM host, for example built by NVKR. Set, the role uses it as is and builds nothing. |
 | `node_image_variant` | str | `non-fde` | Image variant. FDE images share one disk key across all nodes and are for evaluation only. |
@@ -166,12 +166,12 @@ Bootstrap the management cluster with nvkectl and export its kubeconfig and keys
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `gpu_operator_kubeconfig` | str |  | **Required.** Path of the cluster's admin kubeconfig on the target host. |
-| `gpu_operator_version` | str | `v26.7.2` | GPU Operator chart version. Change `gpu_operator_chart_sha256` with it. |
+| `gpu_operator_version` | str | `v26.7.3` | GPU Operator chart version. Change `gpu_operator_chart_sha256` with it. |
 | `gpu_operator_chart_url` | str | `https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-{{ gpu_operator_version }}.tgz` | Where the chart is downloaded from. |
-| `gpu_operator_chart_sha256` | str | `a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6` | SHA-256 of the chart archive. |
+| `gpu_operator_chart_sha256` | str | `506898724dc23aa55bbc9cbe6f3e28d413c20867e76715e726b6fff6ef13d4c7` | SHA-256 of the chart archive. |
 | `gpu_operator_namespace` | str | `gpu-operator` | Namespace of the release, labelled to admit privileged pods. |
 | `gpu_operator_release` | str | `gpu-operator` | Helm release name. |
-| `gpu_operator_driver_version` | str | `615.71.09` | NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.4). A driver image for the node's Ubuntu release must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04` for the default node image). |
+| `gpu_operator_driver_version` | str | `620.70.06` | NVIDIA driver the operator builds on each GPU node; the newest the chart supports (CUDA 13.5). A driver image for the node's Ubuntu release must exist (`nvcr.io/nvidia/driver:<version>-ubuntu26.04` for the default node image). |
 | `gpu_operator_values` | dict | `{}` | More chart values, merged over the role's. |
 | `gpu_operator_helm` | path | `/usr/local/bin/helm` | helm on the target host. |
 | `gpu_operator_kubectl` | path | `/usr/local/bin/kubectl` | kubectl on the target host. |

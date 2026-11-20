@@ -12,11 +12,11 @@ argument_specs:
     options:
       node_image_nvke_version:
         type: str
-        default: v0.22.0
+        default: v0.23.1
         description: NVKE release tag to build from.
       node_image_nvke_commit:
         type: str
-        default: 400c24fb6465b042be883d6b62472528520d6291
+        default: 347baabc64ba320176c6c2ef956e555350124d19
         description: Commit the tag must resolve to.
       node_image_nvke_repo:
         type: str

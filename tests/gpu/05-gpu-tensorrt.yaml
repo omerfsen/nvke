@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: test
-          image: nvcr.io/nvidia/tensorrt:26.09-py3@sha256:651006ce4ec6f361a10b3d9595cba50d263044d18df82be67969c2ff4501db25
+          image: nvcr.io/nvidia/tensorrt:26.11-py3@sha256:115a1b4a7c77fb72c019e57518601a047192b50d683bafb7cd16b38258d81039
           command: [python3, -c]
           args:
             - |

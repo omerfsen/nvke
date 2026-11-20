@@ -1,8 +1,8 @@
 ---
 # NVKE source the image is built from: a release tag and the commit it must
 # resolve to, so a moved tag fails the build instead of building something else.
-node_image_nvke_version: v0.22.0
-node_image_nvke_commit: 400c24fb6465b042be883d6b62472528520d6291
+node_image_nvke_version: v0.23.1
+node_image_nvke_commit: 347baabc64ba320176c6c2ef956e555350124d19
 node_image_nvke_repo: https://github.com/dsx-ai-factory/nvke.git
 
 # What to build. The non-FDE variant is the one the bootstrap documents; FDE

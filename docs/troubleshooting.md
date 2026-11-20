@@ -49,6 +49,24 @@ From NVKE's *Bootstrap the management cluster*, "If the bootstrap fails":
 
 On KVM it is usually quicker to destroy the VMs and run `kvm.yml` again.
 
+## `/etc/cni/net.d already holds nerdctl network config(s)`
+
+Since v0.23.0 `nvkectl bootstrap site` stops before it creates anything when
+the bootstrap host's `/etc/cni/net.d` has a `nerdctl-*.conflist`. The role
+sets `cni_netconfpath = "/etc/containerd-nerdctl/net.d"` in
+`/etc/nerdctl/nerdctl.toml`, so its own runs never write one there; a file
+there comes from nerdctl run on that host before the role, or without that
+setting. From NVKE's *Troubleshoot*: list the bridges first
+(`grep -h '"bridge":' /etc/cni/net.d/nerdctl-*.conflist`), remove the files,
+delete each bridge with `ip link delete <bridge>`, and run the playbook again.
+
+## "was bootstrapped with NVKE vX, and nvke_version is vY"
+
+The running management cluster was bootstrapped with another release than the
+one pinned now, and NVKE does not upgrade it in place. Pin its release, or
+destroy it and bootstrap a new one: see
+[Move to a new NVKE release](kvm.md#move-to-a-new-nvke-release).
+
 ## `nvke-agent` fails to start on a node before the bootstrap
 
 Expected. It waits for the SPIRE agent's workload API, which exists only once
