@@ -219,14 +219,14 @@ gets the GPU:
 - **The VM** (`libvirt_vm`, `libvirt_vm_hostdevs`): the functions are
   attached with `managed='no'`, so libvirt fails the start rather than take a
   device from a host driver.
-- **The GPU Operator** (`gpu_operator`), from the bootstrap host: the chart
-  version AICR pins (`v26.7.2`, checksum verified), the toolkit values of
+- **The GPU Operator** (`gpu_operator`), from the bootstrap host: the newest
+  chart (`v26.7.3`, checksum verified; AICR 1.3.0 pins `v26.7.2`), the toolkit values of
   AICR's NVKE recipe (`RUNTIME_CONFIG_SOURCE=file`: NVKE's containerd 2.3
   has a version 3 config that the toolkit's default source would see as
   version 4, and its drop-in would then stop containerd; and no GPU through
-  `NVIDIA_VISIBLE_DEVICES` in unprivileged pods), and driver `615.71.09`
-  (CUDA 13.4), the newest in the chart's component matrix; the chart's
-  default is `595.91.07`. AICR holds `580.173.02` for AWS EFA only, and that
+  `NVIDIA_VISIBLE_DEVICES` in unprivileged pods), and driver `620.70.06`
+  (CUDA 13.5), the newest in the chart's component matrix and its
+  recommended one; the chart's default is `595.91.07`. AICR holds `580.173.02` for AWS EFA only, and that
   driver has no Ubuntu 26.04 image.
 
 The checks: the ClusterPolicy is `ready`, the cluster offers the expected

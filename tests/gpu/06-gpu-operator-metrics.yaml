@@ -19,8 +19,10 @@ spec:
               set -e
               m=$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors \
                     http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metrics)
-              line=$(echo "$m" | grep '^DCGM_FI_DEV_GPU_TEMP{' | head -1)
-              [ -n "$line" ] || { echo "FAIL: no DCGM_FI_DEV_GPU_TEMP metric"; exit 1; }
+              # DCGM Exporter 4.9.0 (GPU Operator v26.7.3) uses the DCGM 4.7
+              # name, DCGM_FI_DEV_GPU_TEMP_CELSIUS; older exporters the old one.
+              line=$(echo "$m" | grep -E '^DCGM_FI_DEV_GPU_TEMP(_CELSIUS)?\{' | head -1)
+              [ -n "$line" ] || { echo "FAIL: no DCGM_FI_DEV_GPU_TEMP(_CELSIUS) metric"; exit 1; }
               echo "$line" | grep -o 'modelName="[^"]*"'
               echo "temperature: ${line##* } C"
               echo "PASS: $(echo "$m" | grep -c '^DCGM_FI_') DCGM samples exported"

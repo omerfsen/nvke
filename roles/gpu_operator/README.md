@@ -4,14 +4,15 @@ Installs the NVIDIA GPU Operator on an NVKE cluster. NVKE's node image
 carries no GPU driver: the GPU Operator builds and loads it on each GPU node,
 and installs the container toolkit and the device plugin.
 
-- the chart version NVIDIA AI Cluster Runtime (AICR) pins, `v26.7.2`,
-  downloaded once and checksum verified;
+- the newest chart, `v26.7.3` (NVIDIA AI Cluster Runtime 1.3.0 pins
+  `v26.7.2`), downloaded once and checksum verified;
 - the toolkit values AICR's NVKE recipe uses: the toolkit reads containerd's
   `config.toml` itself (NVKE's containerd 2.3 has a version 3 config that the
   default config source would migrate, breaking containerd), and only a
   `nvidia.com/gpu` request gives a pod a GPU;
-- driver `615.71.09` (CUDA 13.4), the newest the chart supports, with an
-  Ubuntu 26.04 image (`595.91.07` is the chart's default);
+- driver `620.70.06` (CUDA 13.5), the newest the chart supports and its
+  recommended one, with an Ubuntu 26.04 image (`595.91.07` is the chart's
+  default);
 - installed or upgraded only when the release's chart or values differ;
 - then waits for every operand, checks the GPUs are allocatable, and runs a
   CUDA vectorAdd pod on one GPU (deleted afterwards).

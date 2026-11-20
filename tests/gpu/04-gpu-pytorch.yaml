@@ -11,7 +11,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: test
-          image: docker.io/pytorch/pytorch:2.14.1-cuda13.2-cudnn9-runtime@sha256:c4ab67f95221a342dff0e8ca4543a7b8885f79f7a0029c0e2e39685d5eaf1722
+          image: docker.io/pytorch/pytorch:2.15.0-cuda13.4-cudnn9-runtime@sha256:5f6c9c16762d03d5ca9ea48395a7a46e5ce318e0d6cc4c980d3a336e400c4a05
           command: [python3, -c]
           args:
             - |

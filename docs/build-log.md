@@ -513,3 +513,77 @@ paths already carry the version, so the old release's artifacts stay intact.
 
 NVKR v0.1.0 builds NVKE v0.22.0 and its handoff vars file sets no
 `nvke_version`, so a prebuilt run now has to set it too.
+
+### From scratch on dragon
+
+Every VM on the hypervisor was deleted first, and the lab sizes went up to
+what AICR 1.3.0 needs on top (NKTP telemetry requests about 14 GiB): nodes 6
+vCPU and 16 GiB, the GPU node 12 vCPU and 32 GiB. `kvm.yml` then ran in 27m46s
+with no failure. The node image baked in 6m17s; its build fetched 8 DOCA 3.5.0
+debs for Ubuntu 26.04, and `boot-smoke` passed with the new OVS checks.
+
+```text
+NAME                    STATUS   ROLES           VERSION   OS-IMAGE             KERNEL-VERSION
+nvke-mgmt-cp-46c5ad3c   Ready    control-plane   v1.36.3   Ubuntu 26.04.1 LTS   7.0.0-1025-nvidia
+nvke-mgmt-cp-4bd0acbd   Ready    control-plane   v1.36.3   Ubuntu 26.04.1 LTS   7.0.0-1025-nvidia
+nvke-mgmt-cp-9be6e462   Ready    control-plane   v1.36.3   Ubuntu 26.04.1 LTS   7.0.0-1025-nvidia
+```
+
+On a node: `doca-openvswitch-switch 3.5.0052-1`, `openvswitch-switch` active,
+`ovs-exporter` masked, `nvke-kubeadm-distro` staged for 1.34.2, 1.35.3 and
+1.36.3, `nvke-agent 0.4.0-1-g347baabc`. On the bootstrap host: `nvkectl
+v0.3.0-1-g347baabc`, `nvke-release` holds `v0.23.1`, nerdctl's networks in
+`/etc/containerd-nerdctl/net.d`. GPU tests with GPU Operator v26.7.2 and
+driver 615.71.09: 6/6. Rerun: `changed=0` on all five hosts, 1m48s.
+
+### Newest GPU components
+
+Kubernetes stays at 1.36.3: NVKE v0.23.1 stages and supports only that 1.36
+patch, upstream's 1.36.6 is not on the node, and 1.37.2 arrives with v0.24.0.
+The tools in NVKE's `make/tool-versions.mk` (nerdctl 2.3.5, kind v0.32.0,
+kubectl v1.36.0, clusterctl v1.13.6, Helm v4.2.4, Go 1.27.3, Packer 1.15.4)
+stay at NVKE's pins although upstream has newer ones (nerdctl 2.4.2, kind
+v0.33.0, Cluster API v1.14.4, Helm v4.3.2): nvkectl carries the Cluster API
+version, the docs name Helm v4.2.4 and clusterctl v1.13.6, and kind and nerdctl
+run the seed cluster.
+
+What NVKE does not pin moved to the newest release:
+
+| Component | Was | Now |
+|---|---|---|
+| GPU Operator | v26.7.2 | v26.7.3 (2026-11-17; chart sha256 `506898724dc2…`, as in the NGC index) |
+| Driver | 615.71.09 (CUDA 13.4) | 620.70.06 (CUDA 13.5), the chart matrix's recommended driver |
+| CUDA base test image | 13.4.3-base-ubuntu24.04 | 13.5.0-base-ubuntu26.04 |
+| PyTorch test image | 2.14.1-cuda13.2 | 2.15.0-cuda13.4 |
+| TensorRT test image | 26.09-py3 | 26.11-py3 (TensorRT 11.5.0.61) |
+
+TensorFlow 2.21.0, curl 8.23.0, the vectorAdd sample and the Ubuntu cloud
+image were already the newest. AICR 1.3.0 still pins v26.7.2; on an AICR lab
+nvke's GPU Operator is off, so the two do not meet.
+
+The upgrade ran in place through `kvm.yml` (6m39s, 3 changes: the chart, the
+values file, `helm upgrade` to revision 2):
+
+```text
+nvidia-container-toolkit-daemonset   nvcr.io/nvidia/k8s/container-toolkit:v1.20.2
+nvidia-dcgm-exporter                 nvcr.io/nvidia/k8s/dcgm-exporter:4.7.0-4.9.0-distroless
+nvidia-device-plugin-daemonset       nvcr.io/nvidia/k8s-device-plugin:v0.20.2
+nvidia-driver-daemonset              nvcr.io/nvidia/driver:620.70.06-ubuntu26.04
+
+NVIDIA-SMI 620.70.06   KMD Version: 620.70.06   CUDA UMD Version: 13.5
+```
+
+The first test run failed `06-gpu-operator-metrics`: DCGM Exporter 4.9.0
+uses the DCGM 4.7 metric names, so `DCGM_FI_DEV_GPU_TEMP` is now
+`DCGM_FI_DEV_GPU_TEMP_CELSIUS` (v26.7.3's release notes list this as a
+breaking change). The test accepts both names now, so it also passes against
+older exporters:
+
+```text
+01-gpu-nvidia-smi            PASS         5s    RTX 4080 SUPER, 620.70.06, 16376 MiB
+02-gpu-cuda-vectoradd        PASS         5s
+03-gpu-tensorflow            PASS        30s    TensorFlow 2.21.0 | CUDA 12.5.1
+04-gpu-pytorch               PASS        10s    PyTorch 2.15.0+cu134 | CUDA 13.4
+05-gpu-tensorrt              PASS         5s    TensorRT 11.5.0.61
+06-gpu-operator-metrics      PASS         5s    15 DCGM samples
+```

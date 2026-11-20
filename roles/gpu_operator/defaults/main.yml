@@ -5,18 +5,19 @@
 
 # Admin kubeconfig on the target host.
 gpu_operator_kubeconfig: ""
-# The chart AICR (NVIDIA AI Cluster Runtime) pins, v1.1.2 and v1.2.0-rc0,
-# checksum from the NGC Helm repository index.
-gpu_operator_version: v26.7.2
+# The newest chart, one patch release ahead of what AICR (NVIDIA AI Cluster
+# Runtime) 1.3.0 pins (v26.7.2); checksum from the NGC Helm repository index.
+gpu_operator_version: v26.7.3
 gpu_operator_chart_url: https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-{{ gpu_operator_version }}.tgz
-gpu_operator_chart_sha256: a94a88628a90fac1df8d47469baf14dd352126553f30fd1ecd8e182516ae1bf6
+gpu_operator_chart_sha256: 506898724dc23aa55bbc9cbe6f3e28d413c20867e76715e726b6fff6ef13d4c7
 gpu_operator_namespace: gpu-operator
 gpu_operator_release: gpu-operator
-# The newest driver the chart supports (its component matrix: 615.71.09,
-# 610.57.04, 595.91.07 recommended and default, 580.173.02), for CUDA 13.4.
+# The newest driver the chart supports (its component matrix: 620.70.06
+# recommended, 615.71.10, 615.71.09, 610.57.04, 595.112.07, 595.91.07 default,
+# 580.196.07, 580.173.02).
 # AICR holds 580.173.02, for AWS EFA only, and NVIDIA publishes no Ubuntu
 # 26.04 image of it.
-gpu_operator_driver_version: "615.71.09"
+gpu_operator_driver_version: "620.70.06"
 # More chart values, merged over the role's (vars/main.yml).
 gpu_operator_values: {}
 gpu_operator_helm: /usr/local/bin/helm

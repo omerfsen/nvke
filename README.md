@@ -48,15 +48,17 @@ comes with no guarantee of any kind; see
 | Image build host | Ubuntu/Debian with KVM, of the image's architecture |
 | ansible-core | 2.16 or later |
 | Provisioning | KVM/libvirt (one hypervisor on its NAT network, or several on a shared bridge) |
-| GPU | NVIDIA GPU Operator v26.7.2 (the version AICR pins), driver 615.71.09 (CUDA 13.4); on KVM, one GPU passed through to a node VM with VFIO |
-| Tested | NVKE v0.23.1: not run yet. NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator v26.7.2 ready with driver 615.71.09 (CUDA 13.4, default) and 595.91.07 (CUDA 13.2), CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both, rerun `changed=0` |
+| GPU | NVIDIA GPU Operator v26.7.3, driver 620.70.06 (CUDA 13.5); on KVM, one GPU passed through to a node VM with VFIO |
+| Tested | NVKE v0.23.1, from scratch: 3 nodes Ready (6 vCPU/16 GiB, the GPU node 12 vCPU/32 GiB), rerun `changed=0`; GPU Operator v26.7.2 with driver 615.71.09, then upgraded in place to v26.7.3 with driver 620.70.06 (CUDA 13.5): CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both. NVKE v0.22.0, 3 nodes on Ubuntu 26.04.1 KVM VMs with swtpm TPM 2.0, BGP VIP via FRR on an Ubuntu 22.04 hypervisor: all Ready, rerun `changed=0`, VIP failover; one RTX 4080 SUPER passed through to a node VM on an Ubuntu 24.04 hypervisor: GPU Operator v26.7.2 ready with driver 615.71.09 (CUDA 13.4, default) and 595.91.07 (CUDA 13.2), CUDA, TensorFlow, PyTorch and TensorRT workloads pass on both, rerun `changed=0` |
 
 ## Component versions
 
 Everything this collection installs, and where each version comes from. The
 deployed versions were read off a running cluster built by `kvm.yml` with
-v0.22.0; for v0.23.1 they come from its release notes and source, and the
-kernel is whatever `linux-nvidia` Ubuntu ships when the image is built.
+NVKE v0.23.1 (the kernel is whatever `linux-nvidia` Ubuntu ships when the
+image is built). Tools NVKE pins in its `make/tool-versions.mk` stay at its
+pins even where upstream is newer: that is the set NVKE builds and qualifies
+with.
 
 ### Pinned by this collection
 
@@ -74,8 +76,8 @@ kernel is whatever `linux-nvidia` Ubuntu ships when the image is built.
 | Helm | v4.2.4 | `nvke_helm_version`, bootstrap host |
 | Go | 1.27.3 | `nvke_go_version`, `node_image_go_version` |
 | Packer | 1.15.4 | `node_image_packer_version`, image build host |
-| NVIDIA GPU Operator | v26.7.2 | `gpu_operator_version`, chart sha256 checked; the version AICR pins |
-| NVIDIA driver | 615.71.09 (CUDA 13.4) | `gpu_operator_driver_version` (image `615.71.09-ubuntu26.04`), the newest the chart supports; 595.91.07 (CUDA 13.2, the chart's default) also tested |
+| NVIDIA GPU Operator | v26.7.3 | `gpu_operator_version`, chart sha256 checked; the newest release (AICR 1.3.0 pins v26.7.2) |
+| NVIDIA driver | 620.70.06 (CUDA 13.5) | `gpu_operator_driver_version` (image `620.70.06-ubuntu26.04`), the newest the chart supports and its recommended one; 615.71.09 (CUDA 13.4) and 595.91.07 (CUDA 13.2, the chart's default) also tested |
 | CUDA test image | `cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04` | `gpu_operator_smoke_test_image`, pinned by digest |
 
 Every downloaded binary is pinned to NVKE's own version and checksum
@@ -88,7 +90,7 @@ Every downloaded binary is pinned to NVKE's own version and checksum
 | nvkectl | v0.3.0 |
 | nvke-agent | v0.4.0 |
 | Seed-cluster images (`nke-controller`, `cluster-api-provider-provisioned`) | v0.23.1 |
-| Kernel | `linux-nvidia` 7.0.0-1018 |
+| Kernel | `linux-nvidia` 7.0.0-1025 |
 | containerd / runc (on the nodes) | 2.3.0 / 1.4.2 |
 | SPIRE agent | 1.14.1 (TPM plugin 1.9.0) |
 | Open vSwitch | NVIDIA DOCA OVS 3.5.0 (`doca-openvswitch-switch` 3.5.0052), kernel mode; Ubuntu's 3.7.1 up to v0.22.0 |
@@ -97,14 +99,15 @@ Every downloaded binary is pinned to NVKE's own version and checksum
 | CoreDNS | v1.14.2 |
 | NodeLocal DNSCache | 1.26.8 |
 
-### Set by the GPU Operator chart v26.7.2
+### Set by the GPU Operator chart v26.7.3
 
 | Component | Version |
 |---|---|
-| NVIDIA Container Toolkit | v1.20.1 |
-| NVIDIA device plugin and GPU Feature Discovery | v0.20.1 |
-| DCGM exporter | 4.6.1-4.8.4 |
-| Node Feature Discovery | v0.19.0 |
+| NVIDIA Container Toolkit | v1.20.2 |
+| NVIDIA device plugin and GPU Feature Discovery | v0.20.2 |
+| DCGM exporter | 4.7.0-4.9.0 (DCGM 4.7 metric names, e.g. `DCGM_FI_DEV_GPU_TEMP_CELSIUS`) |
+| Node Feature Discovery | v0.20.1 |
+| MIG Manager | v0.15.2 |
 
 ### From the hypervisor's own packages (not pinned)
 
